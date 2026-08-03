@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestOutputArgument(t *testing.T) {
 	tests := []struct {
@@ -24,14 +27,19 @@ func TestOutputArgument(t *testing.T) {
 }
 
 func TestShouldConvertOutput(t *testing.T) {
+	// Build the paths with filepath.Join rather than hard-coded Windows
+	// separators. The wrapper only ever runs on Windows, but shouldConvertOutput
+	// matches on the base name, and hard-coded backslashes make the assertions
+	// meaningless anywhere else: filepath.Base leaves them untouched on Unix, so
+	// every case would report false and only the want:true one would fail.
 	tests := []struct {
 		name string
 		path string
 		want bool
 	}{
-		{name: "cgo probe", path: `C:\\tmp\\go-build123\\_cgo_.o`, want: true},
-		{name: "ordinary object", path: `C:\\tmp\\go-build123\\image.o`, want: false},
-		{name: "similar name", path: `C:\\tmp\\go-build123\\prefix_cgo_.o`, want: false},
+		{name: "cgo probe", path: filepath.Join("tmp", "go-build123", "_cgo_.o"), want: true},
+		{name: "ordinary object", path: filepath.Join("tmp", "go-build123", "image.o"), want: false},
+		{name: "similar name", path: filepath.Join("tmp", "go-build123", "prefix_cgo_.o"), want: false},
 		{name: "empty", path: "", want: false},
 	}
 
