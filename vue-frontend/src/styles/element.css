@@ -1,0 +1,410 @@
+/*
+* Element Plus theming.
+ *
+ * ORDER NOTE — the reason for the doubled selectors below.
+ *
+ * Element Plus styles ship inside the lazily-loaded route chunks,
+so their
+ * <link> tags are appended to <head> at runtime,
+i.e. after this stylesheet.
+ * A plain `:root` here therefore LOSES to Element Plus's own `:root` in
+ * theme-chalk/base.css,
+which re-declares the whole palette. (That is why the
+ * previous monochrome tokens had no effect and every primary control was still
+ * Element blue.)
+ *
+ * `:root:root` has specificity (0,
+2,
+0) against their (0,
+1,
+0),
+so it wins
+ * regardless of load order. Same idea for the `#app` / `body` prefixes further
+ * down: Element Plus declares its per-component variables on the component
+ * selector itself,
+which beats anything merely inherited from :root,
+so those
+ * have to be re-declared on a selector that outranks `.el-card` & co.
+ */
+
+:root:root {
+  /* ---- Monochrome accent ramp ------------------------------------------ */
+  --el-color-primary: #1d1d1f;
+  --el-color-primary-light-3: #4a4a4d;
+  --el-color-primary-light-5: #6e6e73;
+  --el-color-primary-light-7: #a1a1a6;
+  --el-color-primary-light-8: #c7c7cc;
+  --el-color-primary-light-9: #f0f0f3;
+  --el-color-primary-dark-2: #0f0f11;
+
+  /*
+   * Status stays in greyscale to hold the palette. The states are still
+   * distinguishable because each one carries a different fill weight and icon,
+   * which is how the rest of this UI separates them too.
+   */
+  --el-color-success: #1d1d1f;
+  --el-color-warning: #57575c;
+  --el-color-danger: #1d1d1f;
+  --el-color-error: #1d1d1f;
+  --el-color-info: #86868b;
+
+  --el-color-white: #ffffff;
+  --el-color-black: #000000;
+
+  /* ---- Text ------------------------------------------------------------- */
+  --el-text-color-primary: var(--mac-text);
+  --el-text-color-regular: #3a3a3d;
+  --el-text-color-secondary: var(--mac-text-secondary);
+  --el-text-color-placeholder: var(--mac-text-quaternary);
+  --el-text-color-disabled: #c7c7cc;
+
+  /* ---- Borders ---------------------------------------------------------- */
+  --el-border-color: rgba(0, 0, 0, 0.13);
+  --el-border-color-light: rgba(0, 0, 0, 0.1);
+  --el-border-color-lighter: rgba(0, 0, 0, 0.08);
+  --el-border-color-extra-light: rgba(0, 0, 0, 0.05);
+  --el-border-color-dark: rgba(0, 0, 0, 0.18);
+  --el-border-color-darker: rgba(0, 0, 0, 0.24);
+  --el-border-color-hover: rgba(0, 0, 0, 0.28);
+
+  /* ---- Fills & backgrounds ---------------------------------------------- */
+  --el-bg-color: var(--mac-surface);
+  --el-bg-color-page: var(--mac-bg);
+  --el-bg-color-overlay: var(--mac-surface);
+  --el-fill-color: var(--mac-surface-strong);
+  --el-fill-color-light: var(--mac-surface-muted);
+  --el-fill-color-lighter: #f7f7f9;
+  --el-fill-color-extra-light: #fafafc;
+  --el-fill-color-blank: #ffffff;
+
+  --el-disabled-bg-color: var(--mac-surface-muted);
+  --el-disabled-text-color: #b0b0b5;
+  --el-disabled-border-color: rgba(0, 0, 0, 0.08);
+
+  /* ---- Shape ------------------------------------------------------------ */
+  --el-border-radius-base: var(--mac-radius-control);
+  --el-border-radius-small: var(--mac-radius-xs);
+  --el-border-radius-round: var(--mac-radius-full);
+
+  /* ---- Type ------------------------------------------------------------- */
+  --el-font-family: var(--mac-font);
+  --el-font-size-base: var(--mac-text-md);
+  --el-font-size-small: var(--mac-text-base);
+  --el-font-size-extra-small: var(--mac-text-sm);
+  /* 500 reads thin in SF; 590 matches the weight macOS uses on controls. */
+  --el-font-weight-primary: 590;
+
+  /* ---- Elevation & motion ----------------------------------------------- */
+  --el-box-shadow: var(--mac-elev-3);
+  --el-box-shadow-light: var(--mac-elev-1);
+  --el-box-shadow-lighter: var(--mac-elev-1);
+  --el-box-shadow-dark: var(--mac-elev-4);
+
+  --el-transition-duration: var(--mac-dur);
+  --el-transition-duration-fast: var(--mac-dur-fast);
+
+  --el-component-size: 34px;
+  --el-component-size-large: 40px;
+  --el-component-size-small: 28px;
+}
+
+/* ---- Buttons ------------------------------------------------------------ */
+/*
+* A macOS control is not a flat rectangle: the default button carries a faint
+ * top-to-bottom gradient and a hairline ring,
+and the accent button adds an
+ * inset white highlight along its top edge. That highlight is the detail that
+ * makes it read as a system control instead of a web button.
+ *
+ * Every rule below is anchored twice — `#app` for buttons in the page,
+and
+ * `.el-overlay` for the confirm/cancel buttons inside dialogs and message
+ * boxes,
+which are teleported to <body> and so never match `#app`.
+ */
+
+#app .el-button,
+body .el-overlay .el-button {
+  min-height: 34px;
+  padding: 0 14px;
+  border-color: var(--mac-border);
+  border-radius: var(--mac-radius-control);
+  background: var(--mac-control-bg);
+  box-shadow: 0 1px 1.5px rgba(0, 0, 0, 0.035);
+  font-weight: 590;
+  letter-spacing: -0.01em;
+  transition: background var(--mac-dur-fast) var(--mac-ease),
+    border-color var(--mac-dur-fast) var(--mac-ease),
+    box-shadow var(--mac-dur-fast) var(--mac-ease);
+}
+
+#app .el-button:hover,
+body .el-overlay .el-button:hover {
+  border-color: var(--mac-border-strong);
+  background: var(--mac-control-bg-hover);
+}
+
+#app .el-button:active,
+body .el-overlay .el-button:active {
+  background: var(--mac-control-bg-active);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+#app .el-button--primary,
+body .el-overlay .el-button--primary,
+#app .el-button--success,
+body .el-overlay .el-button--success,
+#app .el-button--danger,
+body .el-overlay .el-button--danger {
+  border-color: transparent;
+  color: var(--mac-white);
+  background: var(--mac-accent-bg);
+  box-shadow: var(--mac-accent-ring);
+}
+
+#app .el-button--primary:hover,
+body .el-overlay .el-button--primary:hover,
+#app .el-button--success:hover,
+body .el-overlay .el-button--success:hover,
+#app .el-button--danger:hover,
+body .el-overlay .el-button--danger:hover {
+  border-color: transparent;
+  color: var(--mac-white);
+  background: var(--mac-accent-bg-hover);
+}
+
+#app .el-button--primary:active,
+body .el-overlay .el-button--primary:active,
+#app .el-button--success:active,
+body .el-overlay .el-button--success:active,
+#app .el-button--danger:active,
+body .el-overlay .el-button--danger:active {
+  background: var(--mac-black-active);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+#app .el-button.is-disabled,
+body .el-overlay .el-button.is-disabled,
+#app .el-button.is-disabled:hover,
+body .el-overlay .el-button.is-disabled:hover {
+  border-color: var(--mac-border-soft);
+  color: var(--mac-text-quaternary);
+  background: var(--mac-surface-muted);
+  box-shadow: none;
+}
+
+#app .el-button--primary.is-disabled,
+body .el-overlay .el-button--primary.is-disabled,
+#app .el-button--primary.is-disabled:hover,
+body .el-overlay .el-button--primary.is-disabled:hover {
+  color: rgba(255, 255, 255, 0.72);
+  background: #b0b0b5;
+  box-shadow: none;
+}
+
+/* Text/link buttons should not carry control chrome at all. */
+#app .el-button.is-link,
+body .el-overlay .el-button.is-link,
+#app .el-button.is-text,
+body .el-overlay .el-button.is-text {
+  min-height: auto;
+  padding: 0 4px;
+  border-color: transparent;
+  color: var(--mac-text-secondary);
+  background: none;
+  box-shadow: none;
+}
+
+#app .el-button.is-link:hover,
+body .el-overlay .el-button.is-link:hover,
+#app .el-button.is-text:hover,
+body .el-overlay .el-button.is-text:hover {
+  border-color: transparent;
+  color: var(--mac-text);
+  background: none;
+}
+
+#app .el-button:focus-visible,
+body .el-overlay .el-button:focus-visible {
+  outline: none;
+  box-shadow: var(--mac-focus-ring);
+}
+
+#app .el-button + .el-button,
+body .el-overlay .el-button + .el-button {
+  margin-left: var(--mac-space-2);
+}
+
+/* ---- Card --------------------------------------------------------------- */
+
+#app .el-card {
+  --el-card-border-radius: var(--mac-radius-lg);
+  --el-card-border-color: var(--mac-border-soft);
+  --el-card-bg-color: var(--mac-surface);
+  --el-card-padding: 20px;
+  box-shadow: var(--mac-elev-1);
+}
+
+#app .el-card__header {
+  border-bottom: 1px solid var(--mac-border-soft);
+}
+
+/* ---- Inputs ------------------------------------------------------------- */
+
+#app .el-input__wrapper,
+#app .el-textarea__inner {
+  border-radius: var(--mac-radius-control);
+  background: var(--mac-surface);
+  box-shadow: inset 0 0 0 1px var(--mac-border);
+  transition: box-shadow var(--mac-dur-fast) var(--mac-ease);
+}
+
+#app .el-input__wrapper:hover,
+#app .el-textarea__inner:hover {
+  box-shadow: inset 0 0 0 1px var(--mac-border-strong);
+}
+
+#app .el-input__wrapper.is-focus,
+#app .el-input__wrapper:focus-within,
+#app .el-textarea__inner:focus {
+  box-shadow: inset 0 0 0 1px var(--mac-black), var(--mac-focus-ring);
+}
+
+#app .el-input.is-disabled .el-input__wrapper {
+  background: var(--mac-surface-muted);
+  box-shadow: inset 0 0 0 1px var(--mac-border-soft);
+}
+
+#app .el-input__inner::placeholder,
+#app .el-textarea__inner::placeholder {
+  color: var(--mac-text-quaternary);
+}
+
+/* ---- Forms -------------------------------------------------------------- */
+
+#app .el-form-item__label {
+  color: var(--mac-text-secondary);
+  font-weight: 500;
+}
+
+#app .el-form-item__error {
+  margin-top: 4px;
+  color: var(--mac-text-secondary);
+  font-size: var(--mac-text-sm);
+}
+
+/* ---- Overlays ----------------------------------------------------------- */
+/*
+* Dialogs,
+messages and message boxes are teleported to <body>,
+so they sit
+ * outside #app and need their own anchor.
+ */
+
+body .el-overlay {
+  background: rgba(0, 0, 0, 0.26);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+body .el-dialog {
+  padding: 0;
+  border: 1px solid var(--mac-border-soft);
+  border-radius: var(--mac-radius-xl);
+  background: var(--mac-surface);
+  box-shadow: var(--mac-elev-4);
+  overflow: hidden;
+}
+
+body .el-dialog__header {
+  margin: 0;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--mac-border-soft);
+}
+
+body .el-dialog__title {
+  color: var(--mac-text);
+  font-size: var(--mac-text-lg);
+  font-weight: 650;
+  letter-spacing: var(--mac-tracking-tight);
+}
+
+body .el-dialog__body {
+  padding: 20px 22px;
+  color: var(--mac-text);
+}
+
+body .el-dialog__footer {
+  padding: 14px 22px 18px;
+  border-top: 1px solid var(--mac-border-soft);
+  background: var(--mac-surface-muted);
+}
+
+body .el-message-box {
+  padding: 0;
+  border: 1px solid var(--mac-border-soft);
+  border-radius: var(--mac-radius-lg);
+  background: var(--mac-surface);
+  box-shadow: var(--mac-elev-4);
+  overflow: hidden;
+}
+
+body .el-message-box__header {
+  padding: 18px 20px 8px;
+}
+
+body .el-message-box__title {
+  color: var(--mac-text);
+  font-size: var(--mac-text-lg);
+  font-weight: 650;
+  letter-spacing: var(--mac-tracking-tight);
+}
+
+body .el-message-box__content {
+  padding: 0 20px 18px;
+  color: var(--mac-text-secondary);
+}
+
+body .el-message-box__btns {
+  padding: 14px 20px;
+  border-top: 1px solid var(--mac-border-soft);
+  background: var(--mac-surface-muted);
+}
+
+body .el-message-box__status {
+  color: var(--mac-text-tertiary);
+}
+
+/*
+* Toasts use the same frosted material as the toolbars so they read as system
+ * notifications rather than page content.
+ */
+body .el-message {
+  --el-message-text-color: var(--mac-text);
+  padding: 11px 16px;
+  border: 1px solid var(--mac-border-soft);
+  border-radius: var(--mac-radius-md);
+  background: var(--mac-material-strong);
+  -webkit-backdrop-filter: var(--mac-material-blur);
+  backdrop-filter: var(--mac-material-blur);
+  box-shadow: var(--mac-elev-3);
+}
+
+body .el-message .el-message__content {
+  color: var(--mac-text);
+  font-size: var(--mac-text-md);
+}
+
+body .el-message .el-message__icon {
+  color: var(--mac-text-tertiary);
+}
+
+/* Errors keep a solid leading edge so they still separate from a success
+* toast without reintroducing a second hue. */
+body .el-message--error {
+  border-left: 3px solid var(--mac-black);
+}
+
+body .el-message--error .el-message__icon {
+  color: var(--mac-text);
+}

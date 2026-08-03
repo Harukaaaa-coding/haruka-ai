@@ -1,0 +1,13 @@
+[emailConfig]
+email = "local@example.test"
+authcode = "local-auth"
+
+[mysqlConfig]
+password = "local-mysql-password"
+
+[ragModelConfig]
+chatModelName = "local-chat"
+dimension = 768
+
+[voiceServiceConfig]
+voiceServiceApiKey = "local-tts-key"

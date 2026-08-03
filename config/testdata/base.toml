@@ -1,0 +1,50 @@
+[mainConfig]
+appName = "base"
+host = "127.0.0.1"
+port = 9090
+
+[emailConfig]
+email = "base@example.test"
+authcode = "base-auth"
+
+[mysqlConfig]
+host = "127.0.0.1"
+port = 3306
+user = "base-user"
+password = "base-password"
+databaseName = "base-db"
+charset = "utf8mb4"
+
+[redisConfig]
+host = "127.0.0.1"
+port = 6379
+password = "base-redis-password"
+db = 0
+
+[rabbitmqConfig]
+host = "127.0.0.1"
+port = 5672
+username = "base-rabbit-user"
+password = "base-rabbit-password"
+vhost = "base-vhost"
+
+[jwtConfig]
+expire_duration = 24
+issuer = "base-issuer"
+subject = "base-subject"
+key = "base-jwt-key"
+
+[ragModelConfig]
+embeddingModel = "base-embedding"
+chatModelName = "base-chat"
+docDir = "./base-uploads"
+baseUrl = "https://base.example.test/v1"
+dimension = 1024
+
+[ollamaConfig]
+baseUrl = "http://127.0.0.1:11434"
+modelName = "base-ollama"
+
+[voiceServiceConfig]
+voiceServiceApiKey = "base-tts-key"
+voiceServiceSecretKey = "base-tts-secret"

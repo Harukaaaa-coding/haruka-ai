@@ -1,0 +1,2 @@
+{"messages":[{"role":"system","content":"你是 GopherAI 的中文技术助手。回答应准确、简洁。"},{"role":"user","content":"GopherAI 的本地默认对话模型是什么？"},{"role":"assistant","content":"默认是通过 Ollama 运行的 deepseek-r1:1.5b。"}]}
+{"messages":[{"role":"system","content":"你是 GopherAI 的中文技术助手。回答应准确、简洁。"},{"role":"user","content":"RAG 检索结果应该包含什么？"},{"role":"assistant","content":"应包含实际参与提示词的知识库来源，并给出文档、标题和字符区间等引用信息。"}]}

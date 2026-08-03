@@ -1,0 +1,54 @@
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+config/*.local.toml
+
+# Go build and test artifacts
+.cache/
+GopherAI
+GopherAI.exe
+gopherai-mcp
+gopherai-mcp.exe
+*.test
+*.out
+coverage.*
+
+# Frontend dependencies and build output
+vue-frontend/node_modules/
+vue-frontend/dist/
+vue-frontend/.eslintcache
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Runtime data
+uploads/
+uploads.pre-restore-*/
+backups/
+.restore-staging-*/
+logs/
+*.log
+
+# Large/native local assets and portable toolchains
+models/
+runtime/
+tools/
+*.onnx
+imagenet_classes.txt
+onnxruntime.dll
+libonnxruntime.so*
+libonnxruntime.dylib
+
+# Local LLM training artifacts and private datasets
+training/data/*.jsonl
+!training/data/*.example.jsonl
+training/outputs/
+training/cache/
+training/.venv/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

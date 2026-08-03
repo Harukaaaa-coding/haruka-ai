@@ -1,0 +1,7 @@
+FROM ./model.gguf
+
+PARAMETER temperature 0.6
+PARAMETER top_p 0.95
+PARAMETER num_ctx 8192
+
+SYSTEM """你是 GopherAI 的中文技术助手。回答应准确、清晰，并在不确定时明确说明。"""

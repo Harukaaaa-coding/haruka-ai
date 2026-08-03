@@ -1,0 +1,24 @@
+{
+  "service_allowlist": [
+    "weather"
+  ],
+  "approval_ttl_seconds": 300,
+  "servers": [
+    {
+      "id": "weather",
+      "url": "http://127.0.0.1:8081/mcp",
+      "enabled": true,
+      "timeout_ms": 30000,
+      "tool_allowlist": [
+        "get_weather"
+      ],
+      "read_only_tools": [
+        "get_weather"
+      ],
+      "risk_levels": {
+        "get_weather": "low"
+      },
+      "max_read_only_retries": 1
+    }
+  ]
+}

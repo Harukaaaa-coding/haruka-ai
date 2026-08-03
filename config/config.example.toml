@@ -1,0 +1,72 @@
+# Copy this file to config/config.toml when recreating the configuration.
+# All credentials below are intentionally empty or development-only examples.
+
+[mainConfig]
+appName = "GopherAI"
+host = "127.0.0.1"
+port = 9090
+
+[emailConfig]
+# The current email implementation uses smtp.163.com:465 with implicit TLS.
+authcode = ""
+email = ""
+
+[redisConfig]
+host = "127.0.0.1"
+port = 6379
+# Matches the local docker-compose.yml default. Set a real secret with
+# GOPHERAI_REDIS_PASSWORD before a non-local deployment.
+password = "gopherai_redis_dev_password"
+db = 0
+
+[mysqlConfig]
+host = "127.0.0.1"
+port = 13306
+user = "gopherai"
+password = "gopherai_dev_password"
+databaseName = "gopherai"
+charset = "utf8mb4"
+
+[jwtConfig]
+expire_duration = 24
+issuer = "gopherai-local"
+subject = "gopherai-user"
+key = "dev-only-change-before-production"
+
+[rabbitmqConfig]
+host = "127.0.0.1"
+port = 5672
+username = "gopherai"
+password = "gopherai_dev_password"
+vhost = "gopherai"
+
+[ragModelConfig]
+# Local Ollama defaults; override these for another OpenAI-compatible service.
+embeddingModel = "embeddinggemma:latest"
+chatModelName = "deepseek-r1:1.5b"
+docDir = "./uploads"
+baseUrl = "http://127.0.0.1:11434/v1"
+# Must match the output dimension of the selected embedding model.
+dimension = 768
+
+[ollamaConfig]
+# Ollama's native API root; do not append /v1 here.
+baseUrl = "http://127.0.0.1:11434"
+modelName = "deepseek-r1:1.5b"
+
+[voiceServiceConfig]
+# Baidu Intelligent Cloud long-text TTS credentials; leave blank when unused.
+voiceServiceApiKey = ""
+voiceServiceSecretKey = ""
+
+[voiceRealtimeConfig]
+# Server-side ASR provider ID. `baidu-batch` is the built-in fallback.
+asrProvider = "baidu-batch"
+# Optional Fish Audio S2 output for realtime voice turns. Keep API keys in
+# GOPHERAI_FISH_AUDIO_API_KEY or config.local.toml, never in this file.
+fishAudioApiKey = ""
+fishAudioBaseUrl = "https://api.fish.audio"
+fishAudioModel = "s2-pro"
+fishAudioReferenceId = ""
+# Comma-separated browser origins. Required for cross-origin production UI.
+allowedOrigins = ""

@@ -1,0 +1,132 @@
+/*
+ * Design tokens for the monochrome macOS-style system.
+ *
+ * Everything downstream is expressed in these variables, so a palette change
+ * happens here and nowhere else. The `--mac-*` prefix is kept because the view
+ * stylesheets already reference it.
+ *
+ * Borders and shadows are deliberately alpha-based rather than opaque hex: the
+ * same token then reads correctly on white cards, grey canvas, and translucent
+ * toolbar material without needing a per-surface variant.
+ */
+:root {
+  color-scheme: light;
+
+  /* ---- Canvas & surfaces ------------------------------------------------ */
+  --mac-bg: #f5f5f7;
+  --mac-bg-sunken: #eeeef1;
+  --mac-surface: #ffffff;
+  --mac-surface-muted: #f5f5f7;
+  --mac-surface-strong: #ebebef;
+  --mac-surface-inset: #f0f0f3;
+
+  /* ---- Text ------------------------------------------------------------- */
+  --mac-text: #1d1d1f;
+  --mac-text-secondary: #6e6e73;
+  --mac-text-tertiary: #86868b;
+  --mac-text-quaternary: #aeaeb2;
+  --mac-text-inverse: #ffffff;
+
+  /* ---- Separators ------------------------------------------------------- */
+  --mac-hairline: rgba(0, 0, 0, 0.06);
+  --mac-border-soft: rgba(0, 0, 0, 0.08);
+  --mac-border: rgba(0, 0, 0, 0.13);
+  --mac-border-strong: rgba(0, 0, 0, 0.24);
+
+  /* ---- Monochrome accent ------------------------------------------------ */
+  --mac-black: #1d1d1f;
+  --mac-black-hover: #333336;
+  --mac-black-active: #0f0f11;
+  --mac-white: #ffffff;
+
+  /*
+   * Elevation is two-part on purpose: a tight contact shadow that anchors the
+   * element plus a wide ambient one. A single blurred shadow reads as a drop
+   * shadow; the pair reads as a surface sitting above another surface.
+   */
+  --mac-elev-1: 0 1px 1px rgba(0, 0, 0, 0.02), 0 2px 6px rgba(0, 0, 0, 0.04);
+  --mac-elev-2: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 16px rgba(0, 0, 0, 0.06);
+  --mac-elev-3: 0 2px 6px rgba(0, 0, 0, 0.05), 0 12px 32px rgba(0, 0, 0, 0.1);
+  --mac-elev-4: 0 8px 20px rgba(0, 0, 0, 0.08), 0 24px 64px rgba(0, 0, 0, 0.16);
+
+  /* Retained aliases so existing view styles keep resolving. */
+  --mac-shadow-soft: var(--mac-elev-1);
+  --mac-shadow: var(--mac-elev-2);
+
+  /* ---- Controls --------------------------------------------------------- */
+  /*
+   * The inset top highlight is what makes a control read as a macOS control
+   * rather than a flat web button — it simulates the light source Apple's
+   * system controls are lit by. The 0.5px ring is the button's own hairline.
+   */
+  --mac-control-bg: linear-gradient(180deg, #ffffff 0%, #fafafa 100%);
+  --mac-control-bg-hover: linear-gradient(180deg, #fafafa 0%, #f2f2f4 100%);
+  --mac-control-bg-active: #ededf0;
+  --mac-accent-bg: linear-gradient(180deg, #3a3a3d 0%, #1d1d1f 100%);
+  --mac-accent-bg-hover: linear-gradient(180deg, #48484b 0%, #2b2b2e 100%);
+  --mac-accent-ring: 0 0 0 0.5px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.13);
+  --mac-focus-ring: 0 0 0 3.5px rgba(29, 29, 31, 0.13);
+
+  /* ---- Vibrancy --------------------------------------------------------- */
+  /*
+   * Toolbars and sidebars sample what is behind them. The saturate() boost is
+   * the part people read as "frosted glass" — blur alone looks like fog.
+   */
+  --mac-material: rgba(250, 250, 252, 0.72);
+  --mac-material-strong: rgba(248, 248, 250, 0.86);
+  --mac-material-blur: saturate(180%) blur(20px);
+
+  /* ---- Radii ------------------------------------------------------------ */
+  --mac-radius-xs: 6px;
+  --mac-radius-sm: 8px;
+  --mac-radius-md: 10px;
+  --mac-radius-lg: 14px;
+  --mac-radius-xl: 18px;
+  --mac-radius-2xl: 24px;
+  --mac-radius-full: 999px;
+  --mac-radius-control: 7px;
+
+  /* Retained aliases. */
+  --mac-radius: var(--mac-radius-lg);
+  --mac-radius-small: var(--mac-radius-md);
+
+  /* ---- Typography ------------------------------------------------------- */
+  --mac-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Inter',
+    'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', system-ui, sans-serif;
+  --mac-font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+  --mac-text-xs: 11px;
+  --mac-text-sm: 12px;
+  --mac-text-base: 13px;
+  --mac-text-md: 14px;
+  --mac-text-lg: 16px;
+  --mac-text-xl: 20px;
+  --mac-text-2xl: 26px;
+  --mac-text-3xl: 34px;
+
+  /*
+   * Apple tightens tracking as size grows; leaving it at 0 makes large headings
+   * look loose and generic. These are applied by the type rules in base.css.
+   */
+  --mac-tracking-tight: -0.022em;
+  --mac-tracking-tighter: -0.032em;
+
+  /* ---- Motion ----------------------------------------------------------- */
+  /* The curve macOS uses for panels and sheets: fast out, long gentle settle. */
+  --mac-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --mac-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --mac-dur-fast: 140ms;
+  --mac-dur: 240ms;
+  --mac-dur-slow: 420ms;
+
+  /* ---- Spacing ---------------------------------------------------------- */
+  --mac-space-1: 4px;
+  --mac-space-2: 8px;
+  --mac-space-3: 12px;
+  --mac-space-4: 16px;
+  --mac-space-5: 20px;
+  --mac-space-6: 24px;
+  --mac-space-8: 32px;
+  --mac-space-10: 40px;
+}

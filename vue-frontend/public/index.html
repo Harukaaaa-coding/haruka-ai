@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <link rel="icon" href="<%= BASE_URL %>favicon.svg" type="image/svg+xml">
+    <meta name="theme-color" content="#f5f5f7">
+    <title>GopherAI 智能应用平台</title>
+    <!--
+      Inlined so the canvas is already the right grey on first paint. Without it
+      the browser shows its default white until the entry stylesheet arrives,
+      which reads as a flash on every cold load.
+    -->
+    <style>
+      html, body { margin: 0; background: #f5f5f7; }
+    </style>
+  </head>
+  <body>
+    <noscript>
+      <strong>GopherAI 需要启用 JavaScript 才能正常运行。</strong>
+    </noscript>
+    <div id="app"></div>
+    <!-- built files will be auto injected -->
+  </body>
+</html>

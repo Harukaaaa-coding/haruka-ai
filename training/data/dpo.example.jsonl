@@ -1,0 +1,1 @@
+{"prompt":[{"role":"system","content":"你是 GopherAI 的中文技术助手。"},{"role":"user","content":"本地模型不可用时应该怎么排查？"}],"chosen":[{"role":"assistant","content":"先运行 ollama list 确认模型已下载，再检查 http://127.0.0.1:11434/api/version，最后核对 config.toml 中的模型名和地址。"}],"rejected":[{"role":"assistant","content":"直接重装整个项目即可。"}]}

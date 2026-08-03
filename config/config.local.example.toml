@@ -1,0 +1,37 @@
+# Optional local override. Copy this file to config/config.local.toml and fill
+# only the values that differ from config.toml. The real local file is ignored
+# by Git. Environment variables take precedence over both TOML files.
+
+[emailConfig]
+email = ""
+authcode = ""
+
+# Add only the secret sections that differ from config.toml. Keeping these
+# examples commented prevents a copied local file from replacing usable local
+# development defaults with empty values.
+#
+# [mysqlConfig]
+# password = "your-local-mysql-password"
+#
+# [redisConfig]
+# password = "your-local-redis-password"
+#
+# [rabbitmqConfig]
+# password = "your-local-rabbitmq-password"
+#
+# [jwtConfig]
+# key = "your-local-jwt-secret"
+
+[ragModelConfig]
+embeddingModel = "embeddinggemma:latest"
+chatModelName = "deepseek-r1:1.5b"
+baseUrl = "http://127.0.0.1:11434/v1"
+dimension = 768
+
+[ollamaConfig]
+baseUrl = "http://127.0.0.1:11434"
+modelName = "deepseek-r1:1.5b"
+
+[voiceServiceConfig]
+voiceServiceApiKey = ""
+voiceServiceSecretKey = ""

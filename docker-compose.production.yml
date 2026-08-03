@@ -1,0 +1,71 @@
+name: gopherai
+
+# Production-oriented infrastructure for a backend running on the same host.
+# It intentionally keeps data-plane ports loopback-only and does not publish
+# RabbitMQ's management UI. A containerized backend can instead join this
+# Compose network and use the service names mysql, redis, and rabbitmq.
+#
+# Required secret variables are deliberately fail-closed: Compose refuses to
+# start if an operator accidentally uses development credentials in production.
+services:
+  mysql:
+    image: mysql:8.4.11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${GOPHERAI_MYSQL_ROOT_PASSWORD:?set a production MySQL root password}
+      MYSQL_DATABASE: ${GOPHERAI_MYSQL_DATABASE:-gopherai}
+      MYSQL_USER: ${GOPHERAI_MYSQL_USER:?set the application MySQL user}
+      MYSQL_PASSWORD: ${GOPHERAI_MYSQL_PASSWORD:?set the application MySQL password}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-name-resolve
+    ports:
+      - "127.0.0.1:${GOPHERAI_MYSQL_PORT:-13306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    image: redis/redis-stack-server:7.4.0-v8
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${GOPHERAI_REDIS_PASSWORD:?set the Redis password}
+      REDIS_ARGS: "--requirepass ${GOPHERAI_REDIS_PASSWORD:?set the Redis password}"
+    ports:
+      - "127.0.0.1:${GOPHERAI_REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4.3.4-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${GOPHERAI_RABBITMQ_USERNAME:?set the RabbitMQ user}
+      RABBITMQ_DEFAULT_PASS: ${GOPHERAI_RABBITMQ_PASSWORD:?set the RabbitMQ password}
+      RABBITMQ_DEFAULT_VHOST: ${GOPHERAI_RABBITMQ_VHOST:-gopherai}
+    ports:
+      - "127.0.0.1:${GOPHERAI_RABBITMQ_PORT:-5672}:5672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+volumes:
+  mysql-data:
+  redis-data:
+  rabbitmq-data:
