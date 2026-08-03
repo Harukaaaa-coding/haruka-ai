@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 同一分支的新推送会取消仍在跑的旧任务，避免排队浪费。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: 后端（build / vet / test）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 从 go.mod 读版本，避免与 toolchain 指令冲突。
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: 构建
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      # 这些测试不依赖 MySQL / Redis / RabbitMQ：外部 HTTP 依赖用 httptest 打桩，
+      # 配置里的 127.0.0.1 只是字符串固件。因此无需 service containers。
+      # 需要本机 ONNX Runtime 的集成测试由 GOPHERAI_RUN_ONNX_INTEGRATION 控制，默认跳过。
+      - name: 测试
+        run: go test -race ./...
+
+  mcp-module:
+    name: MCP 子模块
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # common/mcp 是独立 Go module，根目录的 go build/test ./... 覆盖不到它。
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: common/mcp/go.mod
+          cache-dependency-path: common/mcp/go.sum
+
+      - name: 构建与测试
+        working-directory: common/mcp
+        run: |
+          go build ./...
+          go vet ./...
+          go test -race ./...
+
+  frontend:
+    name: 前端（lint / build）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+          cache-dependency-path: vue-frontend/package-lock.json
+
+      - name: 安装依赖
+        working-directory: vue-frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: vue-frontend
+        run: npm run lint -- --no-fix --max-warnings=0
+
+      - name: 构建
+        working-directory: vue-frontend
+        run: npm run build
