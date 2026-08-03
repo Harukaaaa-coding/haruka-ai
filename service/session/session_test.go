@@ -140,6 +140,7 @@ func TestSessionGateReclaimsCanceledWaitersWithoutBreakingSerialization(t *testi
 	}
 
 	acquired := make(chan struct{})
+	released := make(chan struct{})
 	go func() {
 		release, lockErr := lockSession(context.Background(), userName, sessionID)
 		if lockErr != nil {
@@ -147,6 +148,7 @@ func TestSessionGateReclaimsCanceledWaitersWithoutBreakingSerialization(t *testi
 		}
 		close(acquired)
 		release()
+		close(released)
 	}()
 	select {
 	case <-acquired:
@@ -159,6 +161,14 @@ func TestSessionGateReclaimsCanceledWaitersWithoutBreakingSerialization(t *testi
 	case <-acquired:
 	case <-time.After(time.Second):
 		t.Fatal("waiter did not acquire the released session gate")
+	}
+	// The waiter reclaims the gate inside release(), which runs after it signals
+	// acquisition. Wait for that to finish before counting; otherwise the
+	// assertion races the goroutine and sees the still-held gate.
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not release the session gate")
 	}
 	if got := sessionGateCountForTest(); got != baseline {
 		t.Fatalf("idle session gates = %d, want baseline %d", got, baseline)

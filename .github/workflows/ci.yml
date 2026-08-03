@@ -27,6 +27,10 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
+      # 防止 require 块与实际 import 漂移（例如直接依赖被误标为 indirect）。
+      - name: 校验 go.mod / go.sum 已同步
+        run: go mod tidy -diff
+
       - name: 构建
         run: go build ./...
 
@@ -54,6 +58,7 @@ jobs:
       - name: 构建与测试
         working-directory: common/mcp
         run: |
+          go mod tidy -diff
           go build ./...
           go vet ./...
           go test -race ./...
