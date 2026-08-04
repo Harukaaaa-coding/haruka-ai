@@ -1,9 +1,16 @@
 # Keep source text deterministic across Windows and Unix checkouts.
 # UTF-8 is intentionally BOM-free; .editorconfig applies the same rule in editors.
 *.go text eol=lf working-tree-encoding=UTF-8
+# go.mod / go.sum match none of the extension globs above. Without an explicit
+# rule, core.autocrlf rewrites them to CRLF on Windows checkouts while the Go
+# toolchain always writes LF, so `go mod tidy -diff` reports the whole file as
+# changed and the CI gate becomes unreproducible locally.
+go.mod text eol=lf working-tree-encoding=UTF-8
+go.sum text eol=lf working-tree-encoding=UTF-8
 *.js text eol=lf working-tree-encoding=UTF-8
 *.vue text eol=lf working-tree-encoding=UTF-8
 *.json text eol=lf working-tree-encoding=UTF-8
+*.jsonl text eol=lf working-tree-encoding=UTF-8
 *.md text eol=lf working-tree-encoding=UTF-8
 *.toml text eol=lf working-tree-encoding=UTF-8
 *.yml text eol=lf working-tree-encoding=UTF-8
