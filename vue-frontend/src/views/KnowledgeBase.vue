@@ -212,6 +212,40 @@ export default {
       const controller = new AbortController()
       state.controller = controller
       try {
+        if (state.deleteTaskId) {
+          const payload = assertSuccess(
+            await api.get(`/file/index-tasks/${encodeURIComponent(state.deleteTaskId)}`, { signal: controller.signal }),
+            '获取删除状态失败'
+          )
+          if (!isCurrentSelection(state.baseId, state.selectionVersion)) {
+            stopDocumentPoll(state)
+            return
+          }
+          const task = payload.index_task
+          state.attempts += 1
+          state.failures = 0
+          if (task && task.status === 'succeeded') {
+            stopDocumentPoll(state)
+            documents.value = documents.value.filter(item => String(item.id) !== state.documentId)
+            references.value = references.value.filter(item => String(item.document_id) !== state.documentId)
+            void loadKnowledgeBases({ silent: true })
+            ElMessage.success('文档已删除')
+            return
+          }
+          if (task && ['failed', 'cancelled'].includes(task.status)) {
+            stopDocumentPoll(state)
+            void loadKnowledgeBases({ silent: true })
+            ElMessage.error(task.error || '文档删除失败，请稍后重试')
+            return
+          }
+          if (state.attempts >= MAX_DOCUMENT_POLL_ATTEMPTS) {
+            stopDocumentPoll(state)
+            ElMessage.error('文档删除状态查询超时，请稍后刷新')
+            return
+          }
+          scheduleDocumentPoll(state, DOCUMENT_POLL_INTERVAL)
+          return
+        }
         const payload = assertSuccess(
           await api.get(
             `/file/knowledge-bases/${encodeURIComponent(state.baseId)}/documents/${encodeURIComponent(state.documentId)}/status`,
@@ -225,10 +259,24 @@ export default {
         }
 
         const document = payload.document ? normalizeDocument(payload.document) : null
+        const task = payload.index_task
         const index = documents.value.findIndex(item => String(item.id) === state.documentId)
         if (index >= 0 && document) documents.value[index] = document
         state.attempts += 1
         state.failures = 0
+
+        // A page refresh loses the in-memory delete task ID. The document
+        // status endpoint includes its latest task, so recover it and switch
+        // to the delete-specific poll before treating the tombstone as a
+        // normal indexing state.
+        if (document?.status === 'deleting') {
+          const deleteTaskId = task?.type === 'delete' ? (task.id || task.ID) : ''
+          if (deleteTaskId) {
+            state.deleteTaskId = String(deleteTaskId)
+            scheduleDocumentPoll(state, 0)
+            return
+          }
+        }
 
         if (document && ['ready', 'failed'].includes(document.status)) {
           stopDocumentPoll(state)
@@ -266,7 +314,7 @@ export default {
       }
     }
 
-    const pollDocument = (documentId, baseId = currentBaseId(), version = selectionVersion) => {
+    const pollDocument = (documentId, baseId = currentBaseId(), version = selectionVersion, deleteTaskId = '') => {
       const normalizedBaseId = String(baseId || '')
       const normalizedDocumentId = String(documentId || '')
       if (!normalizedBaseId || !normalizedDocumentId || !isCurrentSelection(normalizedBaseId, version)) return
@@ -283,7 +331,8 @@ export default {
         paused: !isPageVisible(),
         stopped: false,
         timer: null,
-        controller: null
+        controller: null,
+        deleteTaskId: String(deleteTaskId || '')
       }
       documentPolls.set(key, state)
       if (!state.paused) scheduleDocumentPoll(state, 0)
@@ -401,7 +450,7 @@ export default {
           : (Array.isArray(payload.knowledge_base?.documents) ? payload.knowledge_base.documents : [])
         documents.value = loadedDocuments.map(normalizeDocument)
         documents.value
-          .filter(item => ['pending', 'indexing'].includes(item.status))
+          .filter(item => ['pending', 'indexing', 'deleting'].includes(item.status))
           .forEach(item => pollDocument(item.id, baseId, version))
         return true
       } catch (error) {
@@ -507,13 +556,15 @@ export default {
         await ElMessageBox.confirm(`确定删除文档“${document.name}”吗？`, '删除文档', {
           type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
         })
-        assertSuccess(await api.delete(`/file/knowledge-bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}`), '删除文档失败')
+        const payload = assertSuccess(await api.delete(`/file/knowledge-bases/${encodeURIComponent(baseId)}/documents/${encodeURIComponent(documentId)}`), '删除文档失败')
         if (!isCurrentSelection(baseId, version)) return
         stopDocumentPolls(state => state.baseId === baseId && state.documentId === documentId)
-        documents.value = documents.value.filter(item => String(item.id) !== documentId)
+        const index = documents.value.findIndex(item => String(item.id) === documentId)
+        if (index >= 0) documents.value[index] = { ...documents.value[index], status: 'deleting', error: '' }
         references.value = references.value.filter(item => String(item.document_id) !== documentId)
-        await loadKnowledgeBases({ silent: true })
-        ElMessage.success('文档已删除')
+        const taskId = payload.index_task?.id || payload.index_task?.ID
+        if (taskId) pollDocument(documentId, baseId, version, taskId)
+        ElMessage.success('文档删除已排队')
       } catch (error) {
         if (error !== 'cancel' && error !== 'close') ElMessage.error(error.message || '删除文档失败')
       }
@@ -552,7 +603,7 @@ export default {
       return `${(value / 1024 / 1024).toFixed(1)} MB`
     }
     const formatDate = value => value ? new Date(value).toLocaleString() : '—'
-    const statusLabel = status => ({ pending: '等待索引', indexing: '索引中', ready: '已就绪', failed: '失败' }[status] || status)
+    const statusLabel = status => ({ pending: '等待索引', indexing: '索引中', ready: '已就绪', deleting: '删除中', failed: '失败' }[status] || status)
 
     onMounted(() => {
       document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -888,7 +939,8 @@ button:disabled {
 
 /* Work still in flight: the quietest weight, a muted fill with no edge. */
 .status-pending,
-.status-indexing {
+.status-indexing,
+.status-deleting {
   color: var(--mac-text-secondary);
   background: var(--mac-surface-strong);
 }

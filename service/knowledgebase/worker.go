@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -19,6 +20,8 @@ const (
 	maxIndexAttempts = 3
 	workerPollPeriod = 2 * time.Second
 	staleTaskAge     = 10 * time.Minute
+	deleteRetryBase  = time.Minute
+	deleteRetryMax   = 30 * time.Minute
 )
 
 var (
@@ -118,8 +121,49 @@ func runIndexWorker(ctx context.Context) {
 			if err := dao.RecoverStaleTasks(time.Now().Add(-staleTaskAge)); err != nil {
 				log.Printf("knowledge index recovery failed: %v", err)
 			}
+			if err := requeueFailedDeleteTasks(time.Now()); err != nil {
+				log.Printf("knowledge delete retry recovery failed: %v", err)
+			}
 		}
 	}
+}
+
+func requeueFailedDeleteTasks(now time.Time) error {
+	tasks, err := dao.ListFailedDeleteTasks(20)
+	if err != nil {
+		return err
+	}
+	for _, task := range tasks {
+		if task.UpdatedAt.Add(deleteRetryDelay(task.Attempts)).After(now) {
+			continue
+		}
+		requeued, err := dao.RequeueFailedDeleteTask(task.ID)
+		if err != nil {
+			if errors.Is(err, dao.ErrDocumentLifecycleChanged) {
+				log.Printf("knowledge delete task cannot be retried because its document is gone: task=%s", task.ID)
+				continue
+			}
+			return err
+		}
+		if requeued {
+			EnqueueIndexTask(task.ID)
+		}
+	}
+	return nil
+}
+
+func deleteRetryDelay(attempts int) time.Duration {
+	if attempts < 1 {
+		return deleteRetryBase
+	}
+	delay := deleteRetryBase
+	for retry := 1; retry < attempts && delay < deleteRetryMax; retry++ {
+		delay *= 2
+	}
+	if delay > deleteRetryMax {
+		return deleteRetryMax
+	}
+	return delay
 }
 
 func ProcessIndexTaskNow(ctx context.Context, taskID string) error {
@@ -137,6 +181,45 @@ func ProcessIndexTaskNow(ctx context.Context, taskID string) error {
 		}
 		return fmt.Errorf("index task is %s", current.Status)
 	}
+	if task.Type == model.IndexTaskTypeDelete {
+		err = withDocumentLock(task.DocumentID, func() error {
+			document, lookupErr := dao.GetDocument(task.UserName, task.KnowledgeBaseID, task.DocumentID)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if deleteErr := rag.DeleteKnowledgeDocumentIndex(ctx, task.UserName, task.KnowledgeBaseID, task.DocumentID); deleteErr != nil {
+				return deleteErr
+			}
+			if removeErr := os.Remove(document.StoragePath); removeErr != nil && !os.IsNotExist(removeErr) {
+				return fmt.Errorf("remove source document: %w", removeErr)
+			}
+			return dao.CompleteDeleteTask(task.ID, task.DocumentID, task.Attempts)
+		})
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, dao.ErrTaskSuperseded) {
+			return nil
+		}
+		if errors.Is(err, dao.ErrDocumentLifecycleChanged) {
+			// The delete task still owns this attempt, but a stale index worker
+			// changed the document state between cleanup and DB finalization.
+			// Reassert the tombstone and retry the idempotent physical cleanup.
+			if requeueErr := dao.RequeueDeleteTask(task.ID, task.DocumentID, "retrying delete after document lifecycle conflict", task.Attempts); requeueErr != nil && !errors.Is(requeueErr, dao.ErrTaskSuperseded) {
+				return fmt.Errorf("repair delete lifecycle: %w", requeueErr)
+			}
+			EnqueueIndexTask(task.ID)
+			return nil
+		}
+		// The first attempts retry immediately. Once that budget is exhausted,
+		// FailDeleteTask leaves a durable failed task which the recovery loop
+		// retries with exponential backoff until all three stores converge.
+		retry := task.Attempts < maxIndexAttempts && !errors.Is(err, gorm.ErrRecordNotFound)
+		if updateErr := dao.FailDeleteTask(task.ID, task.DocumentID, "删除文档失败，请稍后重试", retry, task.Attempts); updateErr != nil && !errors.Is(updateErr, dao.ErrTaskSuperseded) {
+			return fmt.Errorf("%v; update delete task failure state: %w", err, updateErr)
+		}
+		return err
+	}
 
 	err = withDocumentLock(task.DocumentID, func() error {
 		base, err := dao.GetKnowledgeBase(task.UserName, task.KnowledgeBaseID)
@@ -150,6 +233,9 @@ func ProcessIndexTaskNow(ctx context.Context, taskID string) error {
 		if err != nil {
 			return err
 		}
+		if document.Status == model.DocumentStatusDeleting {
+			return ErrConflict
+		}
 		if err := dao.MarkDocumentIndexing(document.ID); err != nil {
 			return err
 		}
@@ -161,9 +247,29 @@ func ProcessIndexTaskNow(ctx context.Context, taskID string) error {
 		if err != nil {
 			return err
 		}
-		return dao.CompleteIndexTask(task.ID, document.ID, chunkCount)
+		return dao.CompleteIndexTask(task.ID, document.ID, chunkCount, task.Attempts)
 	})
 	if err == nil {
+		return nil
+	}
+	if errors.Is(err, dao.ErrTaskSuperseded) || errors.Is(err, dao.ErrDocumentLifecycleChanged) || errors.Is(err, ErrConflict) {
+		// A delete or newer retry won the lifecycle race. Only deletion owns the
+		// right to remove Redis hashes: an old stale retry must not erase a newer
+		// successful index attempt for the same document.
+		cleanup := errors.Is(err, ErrConflict)
+		if document, lookupErr := dao.GetDocument(task.UserName, task.KnowledgeBaseID, task.DocumentID); lookupErr != nil {
+			cleanup = errors.Is(lookupErr, gorm.ErrRecordNotFound)
+		} else if document.Status == model.DocumentStatusDeleting {
+			cleanup = true
+		}
+		if cleanup {
+			if cleanupErr := rag.DeleteKnowledgeDocumentIndex(ctx, task.UserName, task.KnowledgeBaseID, task.DocumentID); cleanupErr != nil {
+				return fmt.Errorf("cleanup superseded document index: %w", cleanupErr)
+			}
+		}
+		if cancelErr := dao.CancelIndexTask(task.ID, task.Attempts, "superseded by document lifecycle change"); cancelErr != nil && !errors.Is(cancelErr, dao.ErrTaskSuperseded) {
+			return cancelErr
+		}
 		return nil
 	}
 
@@ -174,7 +280,7 @@ func ProcessIndexTaskNow(ctx context.Context, taskID string) error {
 		publicMessage = "知识库或文档已不存在"
 	}
 	retry := task.Attempts < maxIndexAttempts && !errors.Is(err, ErrConflict) && !errors.Is(err, gorm.ErrRecordNotFound)
-	if updateErr := dao.FailIndexTask(task.ID, task.DocumentID, publicMessage, retry); updateErr != nil {
+	if updateErr := dao.FailIndexTask(task.ID, task.DocumentID, publicMessage, retry, task.Attempts); updateErr != nil && !errors.Is(updateErr, dao.ErrTaskSuperseded) {
 		return fmt.Errorf("%v; update task failure state: %w", err, updateErr)
 	}
 	return err

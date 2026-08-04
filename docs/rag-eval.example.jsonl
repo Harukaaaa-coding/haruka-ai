@@ -1,0 +1,2 @@
+{"query":"示例问题：如何安装？","knowledge_base_ids":["replace-with-kb-id"],"relevant_chunk_ids":["replace-with-chunk-id"]}
+{"query":"示例负例：资料中没有的政策是什么？","knowledge_base_ids":["replace-with-kb-id"],"expected_refusal":true}

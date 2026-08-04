@@ -42,8 +42,6 @@ github.com/cloudwego/eino-ext/components/model/ollama v0.1.5 h1:afBsBFwk8cRT3RT5
 github.com/cloudwego/eino-ext/components/model/ollama v0.1.5/go.mod h1:agEXRRhFGNcTjaryXKNYxI58niFnVws5ipOz5QkScIc=
 github.com/cloudwego/eino-ext/components/model/openai v0.1.4 h1:M1GWqYL7bTPQ5MfRWnflL9NDg92UCvBJP7eQLZ/1krw=
 github.com/cloudwego/eino-ext/components/model/openai v0.1.4/go.mod h1:roUSwYROrFZ71aXZJAk48RhEHQWD97+ME0blTdzbsi0=
-github.com/cloudwego/eino-ext/components/retriever/redis v0.0.0-20251111090228-91a10bbc864f h1:H57HqMget73OuAwJvx/peMhJ+iRLRnY9ejkL+S4l9WQ=
-github.com/cloudwego/eino-ext/components/retriever/redis v0.0.0-20251111090228-91a10bbc864f/go.mod h1:V7wMikEuGiFIBFzRgzW/xcfLZGRrZ5+M2lX+qtLBexs=
 github.com/cloudwego/eino-ext/libs/acl/openai v0.1.1 h1:1hGUNWNnFyVSEceoeZWJ7eerFZNg9uZb7MXdXkUf8HU=
 github.com/cloudwego/eino-ext/libs/acl/openai v0.1.1/go.mod h1:f/F5SL81MsbbjNSX5xGIlRM4cxXKKWI+BidKSMM8nEM=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

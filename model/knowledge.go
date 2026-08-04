@@ -14,6 +14,7 @@ const (
 	DocumentStatusIndexing = "indexing"
 	DocumentStatusReady    = "ready"
 	DocumentStatusFailed   = "failed"
+	DocumentStatusDeleting = "deleting"
 
 	IndexTaskTypeIndex  = "index"
 	IndexTaskTypeDelete = "delete"
@@ -22,6 +23,7 @@ const (
 	IndexTaskStatusRunning   = "running"
 	IndexTaskStatusSucceeded = "succeeded"
 	IndexTaskStatusFailed    = "failed"
+	IndexTaskStatusCancelled = "cancelled"
 )
 
 // KnowledgeBase is a user-owned collection of independently indexed documents.
@@ -89,14 +91,19 @@ type KnowledgeBaseSummary struct {
 // Rune offsets are used so values remain correct for Chinese and other Unicode
 // text instead of being byte offsets.
 type KnowledgeReference struct {
-	ChunkID         string  `json:"chunk_id"`
-	KnowledgeBaseID string  `json:"knowledge_base_id"`
-	DocumentID      string  `json:"document_id"`
-	DocumentName    string  `json:"document_name"`
-	Heading         string  `json:"heading,omitempty"`
-	ChunkIndex      int     `json:"chunk_index"`
-	StartRune       int     `json:"start_rune"`
-	EndRune         int     `json:"end_rune"`
-	Score           float64 `json:"score,omitempty"`
-	Content         string  `json:"content,omitempty"`
+	ChunkID string `json:"chunk_id"`
+	// MergedChunkIDs preserves every original chunk represented by a merged
+	// retrieval context. ChunkID remains the canonical citation target while
+	// evaluators and provenance UIs can account for the full source span.
+	MergedChunkIDs  []string `json:"merged_chunk_ids,omitempty"`
+	KnowledgeBaseID string   `json:"knowledge_base_id"`
+	DocumentID      string   `json:"document_id"`
+	DocumentName    string   `json:"document_name"`
+	Heading         string   `json:"heading,omitempty"`
+	ChunkIndex      int      `json:"chunk_index"`
+	CitationIndex   int      `json:"citation_index,omitempty"`
+	StartRune       int      `json:"start_rune"`
+	EndRune         int      `json:"end_rune"`
+	Score           float64  `json:"score,omitempty"`
+	Content         string   `json:"content,omitempty"`
 }

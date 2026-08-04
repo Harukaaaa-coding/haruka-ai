@@ -287,26 +287,41 @@ func Retrieve(ctx context.Context, userName string, knowledgeBaseIDs []string, q
 	}, nil
 }
 
-func DeleteDocument(ctx context.Context, userName, knowledgeBaseID, documentID string) error {
+// ScheduleDeleteDocument makes a document invisible immediately and returns a
+// task that clients can poll until Redis, storage, and MySQL cleanup finish.
+func ScheduleDeleteDocument(ctx context.Context, userName, knowledgeBaseID, documentID string) (*model.KnowledgeIndexTask, error) {
 	if _, err := ownedBase(userName, knowledgeBaseID); err != nil {
-		return err
+		return nil, err
 	}
-	return withDocumentLock(documentID, func() error {
-		document, err := dao.GetDocument(userName, knowledgeBaseID, documentID)
-		if err != nil {
+	var scheduled *model.KnowledgeIndexTask
+	err := withDocumentLock(documentID, func() error {
+		task := &model.KnowledgeIndexTask{ID: uuid.NewString(), KnowledgeBaseID: knowledgeBaseID, DocumentID: documentID, UserName: userName, Type: model.IndexTaskTypeDelete, Status: model.IndexTaskStatusPending}
+		if err := dao.CreateDeleteDocumentTask(userName, knowledgeBaseID, documentID, task); err != nil {
+			if errors.Is(err, dao.ErrDeleteAlreadyScheduled) {
+				existing, lookupErr := dao.GetActiveDeleteTask(userName, knowledgeBaseID, documentID)
+				if lookupErr != nil {
+					return lookupErr
+				}
+				scheduled = existing
+				return nil
+			}
 			return normalizeNotFound(err)
 		}
-		if err := rag.DeleteKnowledgeDocumentIndex(ctx, userName, knowledgeBaseID, documentID); err != nil {
-			return err
-		}
-		if err := dao.DeleteDocumentRecords(userName, knowledgeBaseID, documentID); err != nil {
-			return normalizeNotFound(err)
-		}
-		if err := os.Remove(document.StoragePath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove source document: %w", err)
-		}
+		EnqueueIndexTask(task.ID)
+		scheduled = task
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return scheduled, nil
+}
+
+// DeleteDocument preserves the earlier internal API for callers that do not
+// need task tracking.
+func DeleteDocument(ctx context.Context, userName, knowledgeBaseID, documentID string) error {
+	_, err := ScheduleDeleteDocument(ctx, userName, knowledgeBaseID, documentID)
+	return err
 }
 
 func Delete(ctx context.Context, userName, knowledgeBaseID string) error {

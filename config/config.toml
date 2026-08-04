@@ -47,6 +47,10 @@ docDir = "./uploads"
 baseUrl = "http://127.0.0.1:11434/v1"
 # Must match the output dimension of the selected embedding model.
 dimension = 768
+minScore = 0.25
+candidateFactor = 4
+rrfK = 60
+rerankEnabled = true
 
 [ollamaConfig]
 baseUrl = "http://127.0.0.1:11434"

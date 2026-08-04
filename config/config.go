@@ -61,11 +61,15 @@ type Rabbitmq struct {
 }
 
 type RagModelConfig struct {
-	RagEmbeddingModel string `toml:"embeddingModel"`
-	RagChatModelName  string `toml:"chatModelName"`
-	RagDocDir         string `toml:"docDir"`
-	RagBaseUrl        string `toml:"baseUrl"`
-	RagDimension      int    `toml:"dimension"`
+	RagEmbeddingModel  string  `toml:"embeddingModel"`
+	RagChatModelName   string  `toml:"chatModelName"`
+	RagDocDir          string  `toml:"docDir"`
+	RagBaseUrl         string  `toml:"baseUrl"`
+	RagDimension       int     `toml:"dimension"`
+	RagMinScore        float64 `toml:"minScore"`
+	RagCandidateFactor int     `toml:"candidateFactor"`
+	RagRRFK            int     `toml:"rrfK"`
+	RagRerankEnabled   bool    `toml:"rerankEnabled"`
 }
 
 type OllamaConfig struct {
@@ -197,6 +201,9 @@ func loadConfig(mainPath, localPath string, lookup envLookup) (*Config, error) {
 		}
 	}
 	if err := applyEnvironmentOverrides(loaded, lookup); err != nil {
+		return nil, err
+	}
+	if err := validateRAGConfiguration(loaded); err != nil {
 		return nil, err
 	}
 	if err := validateSecurityConfiguration(loaded, lookup); err != nil {

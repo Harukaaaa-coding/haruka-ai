@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -74,6 +75,26 @@ func applyEnvironmentOverrides(conf *Config, lookup envLookup) error {
 	if err := applyIntegerOverride("GOPHERAI_RAG_DIMENSION", &conf.RagModelConfig.RagDimension, 1, int(^uint(0)>>1), lookup); err != nil {
 		return err
 	}
+	if err := applyIntegerOverride("GOPHERAI_RAG_CANDIDATE_FACTOR", &conf.RagModelConfig.RagCandidateFactor, 1, 20, lookup); err != nil {
+		return err
+	}
+	if err := applyIntegerOverride("GOPHERAI_RAG_RRF_K", &conf.RagModelConfig.RagRRFK, 1, 1000, lookup); err != nil {
+		return err
+	}
+	if raw, ok := lookup("GOPHERAI_RAG_MIN_SCORE"); ok {
+		parsed, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 || parsed > 1 {
+			return fmt.Errorf("environment variable GOPHERAI_RAG_MIN_SCORE must be a number between 0 and 1")
+		}
+		conf.RagModelConfig.RagMinScore = parsed
+	}
+	if raw, ok := lookup("GOPHERAI_RAG_RERANK_ENABLED"); ok {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(raw))
+		if err != nil {
+			return fmt.Errorf("environment variable GOPHERAI_RAG_RERANK_ENABLED must be a boolean")
+		}
+		conf.RagModelConfig.RagRerankEnabled = parsed
+	}
 
 	return nil
 }
@@ -88,6 +109,17 @@ func applyIntegerOverride(name string, target *int, minimum, maximum int, lookup
 		return fmt.Errorf("environment variable %s must be an integer between %d and %d", name, minimum, maximum)
 	}
 	*target = parsed
+	return nil
+}
+
+func validateRAGConfiguration(conf *Config) error {
+	if conf == nil {
+		return fmt.Errorf("RAG configuration is unavailable")
+	}
+	value := conf.RagModelConfig.RagMinScore
+	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1 {
+		return fmt.Errorf("RAG minScore must be a finite number between 0 and 1")
+	}
 	return nil
 }
 

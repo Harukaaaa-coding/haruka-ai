@@ -224,9 +224,11 @@ flowchart LR
 
 > 当一个工具调用发出去了，但结果没能确认（超时、连接中断），步骤会落到 `execution_unknown`。此时系统**绝不自动重放**——因为无法判断副作用是否已经发生。恢复任务时必须由用户显式传 `retry_unknown: true` 才会重试。这是把"不确定性"交还给人来裁决，而不是让系统赌一把。
 
-**崩溃恢复**。任务、步骤和 checkpoint 全部落 MySQL。手动恢复时会**从 MySQL 状态重建 graph**，而不是反序列化一个可能已损坏或版本过旧的 checkpoint blob——这样即使 checkpoint 格式变了，旧任务也不会永久卡死。
+**崩溃恢复**。任务、步骤和 checkpoint 全部落 MySQL。租约过期回收和手动恢复都会先作废旧 checkpoint，再**从 MySQL 状态重建 graph**，而不是反序列化一个可能已损坏、与修正后的步骤状态冲突或版本过旧的 checkpoint blob——这样即使 checkpoint 格式变了，旧任务也不会永久卡死。已完成步骤由 MySQL 中的步骤状态跳过；非幂等工具若在中断时仍为运行态，则进入 `execution_unknown`，不会自动重放。
 
-**租约防脑裂**。`dao/agent` 的写入普遍带 `WithFencingToken`：worker 领取任务时拿到一个单调递增的令牌，写回时校验。如果一个"假死"的旧 worker 复活并试图写回，它的令牌已经过期，写入被拒绝，不会覆盖新 worker 的进展。
+**外部操作标识**。每个工具步骤在转为 `running` 的同一持久化更新中生成 `agent_steps.operation_id`，后续显式重试复用该值。Agent 将它放入 MCP `tools/call` 的 `_meta.gopherai/operation_id`，不会塞入工具 arguments，因此不影响工具 JSON Schema。该字段提供稳定关联和上游幂等键入口；MCP 服务端必须自行承诺并实现按该键去重，平台当前不会伪造“任意上游 exactly-once”。
+
+**租约防脑裂**。`dao/agent` 的写入带 `run_version` fencing：worker 领取任务时拿到一个单调递增的令牌，写回时校验。生产 worker 还携带 `lease_owner`，任务和步骤写入必须同时匹配 owner 且 `lease_until` 尚未过期；因此租约过期后，即使回收轮询尚未递增版本，旧 worker 也不能继续写入。审批中断 checkpoint 是窄例外：审批节点先释放租约，再由 Eino 写入中断 checkpoint，此时仍以 `run_version` 阻止已被重新领取、取消或回收的旧运行覆盖状态。
 
 checkpoint 内容**永不通过 API 返回**，避免内部推理状态泄露。
 

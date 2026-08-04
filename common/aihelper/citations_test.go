@@ -13,11 +13,11 @@ import (
 type citationTestModel struct{}
 
 func (*citationTestModel) GenerateResponse(context.Context, []*schema.Message) (*schema.Message, error) {
-	return &schema.Message{Role: schema.Assistant, Content: "answer"}, nil
+	return &schema.Message{Role: schema.Assistant, Content: "answer [1]"}, nil
 }
 
 func (*citationTestModel) StreamResponse(context.Context, []*schema.Message, StreamCallback) (string, error) {
-	return "answer", nil
+	return "answer [1]", nil
 }
 
 func (*citationTestModel) GetModelType() string { return "test" }
@@ -31,7 +31,7 @@ func TestGenerateResponsePersistsRequestCitations(t *testing.T) {
 		return message, nil
 	})
 	request := rag.NewChatRequestWithSelection([]string{"kb"}, true)
-	request.SetReferences([]appmodel.KnowledgeReference{{ChunkID: "chunk", DocumentName: "guide.md"}})
+	request.SetReferences([]appmodel.KnowledgeReference{{ChunkID: "chunk", DocumentName: "guide.md"}, {ChunkID: "unused", DocumentName: "other.md"}})
 	if _, err := helper.GenerateResponse("user", rag.WithChatRequest(context.Background(), request), "question"); err != nil {
 		t.Fatalf("generate response: %v", err)
 	}

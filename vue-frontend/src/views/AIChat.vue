@@ -123,7 +123,7 @@
             <div class="citation-title">参考来源</div>
             <article v-for="(citation, citationIndex) in message.citations" :key="citation.id || citationIndex" class="citation-card">
               <div class="citation-card-header">
-                <strong><span class="citation-number">{{ citationIndex + 1 }}</span>{{ citation.documentName }}</strong>
+                <strong><span class="citation-number">{{ citation.citationIndex || citationIndex + 1 }}</span>{{ citation.documentName }}</strong>
                 <span v-if="citation.scoreLabel" class="citation-score">相关度 {{ citation.scoreLabel }}</span>
               </div>
               <div v-if="citation.heading" class="citation-heading">{{ citation.heading }}</div>
@@ -330,6 +330,7 @@ export default {
         }
 
         const chunkIndex = numberOrNull(citation.chunk_index ?? citation.chunkIndex)
+		const citationIndex = numberOrNull(citation.citation_index ?? citation.citationIndex)
         const startRune = numberOrNull(citation.start_rune ?? citation.startRune)
         const endRune = numberOrNull(citation.end_rune ?? citation.endRune)
         const score = numberOrNull(citation.score ?? citation.relevance_score ?? citation.relevanceScore)
@@ -339,6 +340,7 @@ export default {
 
         return {
           id: String(citation.chunk_id ?? citation.chunkId ?? citation.id ?? `citation-${index}`),
+          citationIndex,
           documentName: String(citation.document_name ?? citation.documentName ?? citation.source ?? citation.title ?? '未命名来源'),
           heading: String(citation.heading ?? citation.section ?? ''),
           content: String(citation.content ?? citation.snippet ?? citation.excerpt ?? citation.quote ?? ''),

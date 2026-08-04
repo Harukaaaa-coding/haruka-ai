@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -98,6 +99,27 @@ func TestInvalidIntegerOverridesDoNotExposeValues(t *testing.T) {
 				t.Fatalf("validation error %q does not identify %s", err, variable)
 			}
 		})
+	}
+}
+
+func TestInvalidRAGMinScoreOverridesAreRejected(t *testing.T) {
+	for _, value := range []string{"NaN", "+Inf", "-Inf", "1.01", "-0.01"} {
+		t.Run(value, func(t *testing.T) {
+			err := applyEnvironmentOverrides(new(Config), lookupFrom(map[string]string{
+				"GOPHERAI_RAG_MIN_SCORE": value,
+			}))
+			if err == nil {
+				t.Fatalf("applyEnvironmentOverrides(%q) error = nil", value)
+			}
+		})
+	}
+}
+
+func TestValidateRAGConfigurationRejectsNonFiniteScore(t *testing.T) {
+	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if err := validateRAGConfiguration(&Config{RagModelConfig: RagModelConfig{RagMinScore: value}}); err == nil {
+			t.Fatalf("validateRAGConfiguration(%v) error = nil", value)
+		}
 	}
 }
 

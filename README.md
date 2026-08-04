@@ -10,7 +10,7 @@
 - 动态模型目录将 provider、上游模型和应用 pipeline 分离；新请求使用 `openai`、`rag`、`mcp`、`ollama`、`ark`，同时兼容旧 `1`–`4`。
 - Knowledge Base 2.0 支持多库、多文档、异步持久化索引、失败状态、用户隔离、跨库检索以及精确到文档/标题/字符区间的引用。
 - MCP Hub 从受信 registry 动态发现工具，提供服务/工具 allowlist、JSON Schema 参数校验、风险分级、一次性审批、只读重试和脱敏审计。
-- Agent 使用 Eino Graph 执行“规划 → 工具 → 总结”状态流；任务、步骤和 checkpoint 写入 MySQL，支持人工审批、取消、失败恢复与进程中断恢复。非幂等调用结果不确定时不会自动重放，必须由用户显式确认；手动恢复会从 MySQL 状态源重建 graph，因此损坏或旧版本 checkpoint 不会永久卡住任务。
+- Agent 使用 Eino Graph 执行“规划 → 工具 → 总结”状态流；任务、步骤和 checkpoint 写入 MySQL，支持人工审批、取消、失败恢复与进程中断恢复。租约过期回收和手动恢复都会作废旧 checkpoint，并从 MySQL 步骤状态重建 graph；已完成步骤会被跳过。每个工具步骤在首次外部调用前持久化稳定的 `operation_id`，并通过 MCP `_meta.gopherai/operation_id` 传给上游；兼容工具可将其作为幂等键。非幂等调用结果不确定时不会自动重放，必须由用户显式确认，因此损坏、状态冲突或旧版本 checkpoint 不会永久卡住任务。
 - 本地 Ollama 默认使用 `deepseek-r1:1.5b`；Ark/豆包通过火山方舟官方 Responses API 接入，未配置时在目录中显示为不可用。
 - 百度智能云长文本 TTS 与短音频 ASR；浏览器聊天页可直接录音并把识别文本填入输入框。凭据为空时语音功能不可用。
 - ONNX Runtime + MobileNetV2 图像分类采用可选 `onnx` build tag，默认构建无需本机安装 ONNX Runtime。
@@ -173,6 +173,17 @@ go run . --mode client --city Shanghai
 ```
 
 后端启动时会同时启动 Agent worker，并自动扫描数据库中待执行任务。创建 Agent 任务时请选择模型目录中可用的 `chat` pipeline（例如 `ark`、`openai` 或 `ollama`）；工具只会通过 MCP Hub 执行，不能绕过 allowlist、参数校验、风险分级和审计。高风险步骤会停在前端“Agent 任务”页面等待批准或拒绝。
+
+### Agent 进程中断恢复集成测试
+
+默认 `go test ./...` 不连接数据库。若要执行真实的“工具执行中强杀 worker，再启动新 worker”验证，请准备专用、可丢弃的 MySQL 数据库，并显式设置 DSN：
+
+```powershell
+$env:GOPHERAI_AGENT_E2E_MYSQL_DSN = 'user:password@tcp(127.0.0.1:13306)/gopherai_agent_e2e?parseTime=true&loc=UTC'
+go test -tags integration ./service/agent -run TestAgentProcessCrashRecovery -count=1
+```
+
+该测试使用真实 MySQL、真实 GormStore、Eino Graph 和测试子进程的 `Process.Kill()`。它分别验证：幂等工具在重启后重放一次；非幂等工具转为 `execution_unknown` 与 `requires_review`，不自动重放。测试只会对所配置数据库中的测试任务行执行清理，因此 DSN 必须指向专用测试库。
 
 ### 5. 启动前端
 

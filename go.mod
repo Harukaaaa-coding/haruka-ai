@@ -11,7 +11,6 @@ require (
 	github.com/cloudwego/eino-ext/components/indexer/redis v0.0.0-20251111090228-91a10bbc864f
 	github.com/cloudwego/eino-ext/components/model/ollama v0.1.5
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.4
-	github.com/cloudwego/eino-ext/components/retriever/redis v0.0.0-20251111090228-91a10bbc864f
 	github.com/eino-contrib/jsonschema v1.0.2
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-sql-driver/mysql v1.8.1

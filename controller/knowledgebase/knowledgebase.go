@@ -65,6 +65,11 @@ type taskResponse struct {
 	Task *model.KnowledgeIndexTask `json:"index_task,omitempty"`
 }
 
+type deleteDocumentResponse struct {
+	controller.Response
+	Task *model.KnowledgeIndexTask `json:"index_task,omitempty"`
+}
+
 const multipartEnvelopeBytes int64 = 1 << 20
 
 func Create(c *gin.Context) {
@@ -181,14 +186,15 @@ func GetDocumentStatus(c *gin.Context) {
 }
 
 func DeleteDocument(c *gin.Context) {
-	response := new(controller.Response)
-	err := service.DeleteDocument(c.Request.Context(), c.GetString("userName"), c.Param("id"), c.Param("documentId"))
+	response := new(deleteDocumentResponse)
+	task, err := service.ScheduleDeleteDocument(c.Request.Context(), c.GetString("userName"), c.Param("id"), c.Param("documentId"))
 	if err != nil {
-		writeError(c, response, err)
+		writeError(c, &response.Response, err)
 		return
 	}
 	response.Success()
-	c.JSON(http.StatusOK, response)
+	response.Task = task
+	c.JSON(http.StatusAccepted, response)
 }
 
 func Search(c *gin.Context) {

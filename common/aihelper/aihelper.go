@@ -139,6 +139,7 @@ func (a *AIHelper) GenerateResponse(userName string, ctx context.Context, userQu
 
 	modelMsg := utils.ConvertToModelMessage(a.SessionID, userName, schemaMsg)
 	if request := rag.ChatRequestFromContext(ctx); request != nil {
+		request.SetReferences(rag.ReferencesUsedInAnswer(schemaMsg.Content, request.References()))
 		if err := modelMsg.SetKnowledgeReferences(request.References()); err != nil {
 			return nil, fmt.Errorf("encode assistant citations: %w", err)
 		}
@@ -174,6 +175,7 @@ func (a *AIHelper) StreamResponse(userName string, ctx context.Context, cb Strea
 		IsUser:    false,
 	}
 	if request := rag.ChatRequestFromContext(ctx); request != nil {
+		request.SetReferences(rag.ReferencesUsedInAnswer(content, request.References()))
 		if err := modelMsg.SetKnowledgeReferences(request.References()); err != nil {
 			return nil, fmt.Errorf("encode assistant citations: %w", err)
 		}
