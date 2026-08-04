@@ -88,15 +88,15 @@ func (service *Service) pollPending(ctx context.Context) {
 		return
 	}
 	_ = service.store.RecoverStaleTasks(ctx, service.clock.Now().Add(-service.workerOptions.StaleAfter))
-	tasks, err := service.store.ListPendingTasks(ctx, service.workerOptions.BatchSize)
+	taskIDs, err := service.store.ListPendingTaskIDs(ctx, service.workerOptions.BatchSize)
 	if err != nil {
 		return
 	}
-	for index := range tasks {
+	for index := range taskIDs {
 		if ctx.Err() != nil {
 			return
 		}
-		service.processTaskID(ctx, tasks[index].ID)
+		service.processTaskID(ctx, taskIDs[index])
 	}
 }
 

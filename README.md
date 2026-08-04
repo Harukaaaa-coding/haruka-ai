@@ -267,11 +267,13 @@ Go 1.25.5 目前不能直接解析新版 MinGW 产生的 `pe-bigobj` cgo 探测�
 | `GET` | `/api/v1/mcp-hub/audits` | 当前用户的脱敏审计记录 |
 | `POST/GET` | `/api/v1/agent/tasks` | 创建/列出当前用户的 Agent 任务 |
 | `GET` | `/api/v1/agent/tasks/:taskId` | 查询任务、计划和步骤时间线 |
-| `POST` | `/api/v1/agent/tasks/:taskId/steps/:stepId/approve` | 批准等待中的工具步骤并继续 |
+| `POST` | `/api/v1/agent/tasks/:taskId/steps/:stepId/approve` | 批准等待中的工具步骤并继续；必须回传 `expected_digest`（该步骤的 `arguments_digest`）|
 | `POST` | `/api/v1/agent/tasks/:taskId/steps/:stepId/reject` | 拒绝等待中的工具步骤 |
 | `POST` | `/api/v1/agent/tasks/:taskId/resume` | 恢复失败任务；重放未知结果需 `retry_unknown: true` |
 | `POST` | `/api/v1/agent/tasks/:taskId/cancel` | 取消任务并阻止旧 worker 回写 |
 | `POST` | `/api/v1/image/recognize` | 图像分类，multipart 字段为 `image` |
+
+> **升级到本版本时注意**：`approve` 接口新增必填字段 `expected_digest`，是破坏性变更。前端已同步，但 `vue-frontend/dist/` 是 gitignore 的构建产物且由 Go 服务器直接 serve —— **部署前必须重新执行 `npm run build`**，否则旧 bundle 会发送空 body 并收到 400，所有审批失效。其他非浏览器客户端（脚本、运维 runbook）同样需要跟进。同时需应用 `202608040002` 迁移。
 
 聊天会话和历史均使用游标分页，避免长期用户一次读取全部记录。`GET /api/v1/AI/chat/sessions` 可选 `limit`（默认 `50`、最大 `100`）和不透明的 `cursor` 查询参数；`POST /api/v1/AI/chat/history` 接受 `{ "sessionId", "limit", "cursor" }`。两者均返回 `hasMore` 与 `nextCursor`；首个历史页是最新一页但其中消息保持时间正序，携带游标后取得更早的一页。旧客户端省略分页参数仍可工作，只会得到默认大小的最新页。每次成功完成聊天都会刷新会话活跃时间；部署本版本前需应用 `202607290003` 迁移，以建立对应的活动会话索引。
 

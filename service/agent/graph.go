@@ -94,7 +94,9 @@ func (service *Service) buildGraph(ctx context.Context) (compose.Runnable[string
 
 	// The graph name doubles as the checkpoint schema version, so changing the
 	// structure below forces a matching bump of the constant that decides
-	// whether a stored blob is still decodable.
+	// whether a stored blob is still decodable. The same applies to GraphState
+	// in types.go: it is serialized into the blob, so reshaping it must bump
+	// CheckpointSchemaVersion even though this file is untouched.
 	return graph.Compile(
 		ctx,
 		compose.WithGraphName(agentdao.CheckpointSchemaVersion),

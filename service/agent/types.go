@@ -65,7 +65,7 @@ type Store interface {
 	GetOwnedTask(ctx context.Context, userName, taskID string) (*model.AgentTask, error)
 	GetTaskByID(ctx context.Context, taskID string) (*model.AgentTask, error)
 	ListOwnedTasks(ctx context.Context, userName string, offset, limit int) ([]model.AgentTask, int64, error)
-	ListPendingTasks(ctx context.Context, limit int) ([]model.AgentTask, error)
+	ListPendingTaskIDs(ctx context.Context, limit int) ([]string, error)
 	ClaimTask(ctx context.Context, taskID, workerID string, lease time.Duration) (*model.AgentTask, bool, error)
 	RenewLeaseFenced(ctx context.Context, taskID string, runVersion uint64, workerID string, lease time.Duration) error
 	SavePlanWithSummary(ctx context.Context, taskID string, runVersion uint64, summary string, steps []model.AgentStep) error

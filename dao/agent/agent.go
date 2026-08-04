@@ -28,9 +28,12 @@ const (
 	defaultLeaseDuration   = 2 * time.Minute
 	maxApprovalReasonRunes = 500
 
-	// recoverStaleBatchSize bounds how many abandoned tasks a single poll
-	// recovers. Anything left over is picked up by the next poll.
+	// recoverStaleBatchSize bounds how many abandoned tasks are locked and
+	// recovered between scans, keeping any single transaction's lock scope small.
 	recoverStaleBatchSize = 50
+	// recoverStaleMaxRounds bounds how many batches one call drains, so a large
+	// backlog clears without letting a poll run unboundedly long.
+	recoverStaleMaxRounds = 20
 )
 
 // GormStore contains all durable Agent state operations. Supplying the DB
@@ -202,7 +205,13 @@ func (store *GormStore) ListOwnedTasks(ctx context.Context, userName string, off
 	return tasks, total, err
 }
 
-func (store *GormStore) ListPendingTasks(ctx context.Context, limit int) ([]model.AgentTask, error) {
+// ListPendingTaskIDs returns identifiers rather than rows on purpose. The
+// worker only ever claims by ID, and projecting to it keeps
+// idx_agent_task_pending_scan covering — otherwise every poll pays a primary key
+// lookup per row and ships the checkpoint longblob it never reads. Returning
+// []model.AgentTask here would hand callers a struct whose every other field is
+// silently zero.
+func (store *GormStore) ListPendingTaskIDs(ctx context.Context, limit int) ([]string, error) {
 	db, err := store.database()
 	if err != nil {
 		return nil, err
@@ -213,13 +222,13 @@ func (store *GormStore) ListPendingTasks(ctx context.Context, limit int) ([]mode
 	if limit > maxTaskListLimit {
 		limit = maxTaskListLimit
 	}
-	var tasks []model.AgentTask
-	err = db.WithContext(ctx).
+	var taskIDs []string
+	err = db.WithContext(ctx).Model(&model.AgentTask{}).
 		Where("status = ?", model.AgentTaskStatusPending).
 		Order("created_at ASC, id ASC").
 		Limit(limit).
-		Find(&tasks).Error
-	return tasks, err
+		Pluck("id", &taskIDs).Error
+	return taskIDs, err
 }
 
 // ClaimTask atomically acquires a pending task. RunVersion is a fencing token:
@@ -767,7 +776,10 @@ func (store *GormStore) UpdateOwnedStepDecision(ctx context.Context, userName, t
 			Where("id = ? AND task_id = ? AND user_name = ? AND status = ? AND approval_decision IN ?",
 				stepID, taskID, userName, model.AgentStepStatusWaitingApproval,
 				[]string{"", model.AgentApprovalDecisionPending})
-		if expectedDigest != "" {
+		// Keyed on the decision rather than on a non-empty digest so the binding
+		// fails closed: an approve that somehow lost its digest matches no row
+		// instead of silently dropping the predicate from the UPDATE.
+		if decision == model.AgentApprovalDecisionApproved {
 			stepQuery = stepQuery.Where("arguments_digest = ?", expectedDigest)
 		}
 		stepResult := stepQuery.
@@ -795,6 +807,13 @@ func (store *GormStore) UpdateOwnedStepDecision(ctx context.Context, userName, t
 			"finished_at":     finishedAt,
 			"error_message":   taskError,
 			"updated_at":      now,
+			// Approve was the only transition that resumed a task without
+			// invalidating its checkpoint, which is why a graph upgrade could
+			// strand tasks parked here. Dropping the cursor makes this path
+			// identical to stale recovery and resume: the next claim starts a
+			// fresh run and nextRoute skips whatever MySQL records as done.
+			"checkpoint":         nil,
+			"checkpoint_version": gorm.Expr("checkpoint_version + 1"),
 		}
 		if decisionInvalidatesRun(decision) {
 			taskUpdates["run_version"] = gorm.Expr("run_version + 1")
@@ -1016,45 +1035,101 @@ func (store *GormStore) RecoverStaleTasks(ctx context.Context, before time.Time)
 		return ErrInvalidInput
 	}
 	now := store.currentTime()
-
-	// Candidates are scanned without row locks so a large backlog cannot turn
-	// recovery into a single long transaction holding a lock on every stale row.
-	var candidates []model.AgentTask
-	if err := staleTaskQuery(db.WithContext(ctx).Select("id"), now, before).
-		Order("updated_at ASC, id ASC").
-		Limit(recoverStaleBatchSize).
-		Find(&candidates).Error; err != nil {
-		return err
-	}
-
 	var firstErr error
+
+	// Batches are drained in rounds rather than one per call: a fleet restart can
+	// abandon far more than one batch of tasks, and the caller has no way to ask
+	// for more. The round cap keeps a single poll's work bounded, and a task that
+	// keeps failing to recover cannot spin here forever.
+	for round := 0; round < recoverStaleMaxRounds; round++ {
+		// Candidates are scanned without row locks so a large backlog cannot turn
+		// recovery into one long transaction holding a lock on every stale row.
+		var candidates []model.AgentTask
+		if err := staleTaskQuery(db.WithContext(ctx).Select("id"), now, before).
+			Order("updated_at ASC, id ASC").
+			Limit(recoverStaleBatchSize).
+			Find(&candidates).Error; err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			return firstErr
+		}
+		if len(candidates) == 0 {
+			return firstErr
+		}
+		recovered, err := store.recoverCandidates(ctx, db, candidates, now, before, &firstErr)
+		if err != nil {
+			return err
+		}
+		// Forward progress, not batch fullness, decides whether to scan again.
+		// A batch that recovers nothing returns the identical candidate list on
+		// the next scan, so without this a poison row would burn every round and
+		// starve the pending-task claim that follows recovery in the same poll.
+		if recovered == 0 || len(candidates) < recoverStaleBatchSize {
+			return firstErr
+		}
+	}
+	return firstErr
+}
+
+// recoverCandidates recovers one scanned batch and reports how many tasks it
+// actually transitioned. A per-task error is recorded in firstErr and the batch
+// continues; only a cancelled context aborts the round.
+func (store *GormStore) recoverCandidates(
+	ctx context.Context,
+	db *gorm.DB,
+	candidates []model.AgentTask,
+	now, before time.Time,
+	firstErr *error,
+) (int, error) {
+	recovered := 0
 	for index := range candidates {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			// Shutdown is not a recovery failure, so it is reported on its own
+			// rather than conflated with whatever firstErr happens to hold.
+			return recovered, ctx.Err()
 		}
 		// One transaction per task: a row that another worker already claimed,
 		// or that fails to recover, must not roll back the rest of the batch.
+		transitioned := false
 		err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			var task model.AgentTask
 			// Staleness is re-checked under the row lock because the scan above
 			// held none; the task may have been claimed or recovered since.
-			if err := staleTaskQuery(tx.Clauses(clause.Locking{Strength: "UPDATE"}), now, before).
+			// Projected down to the columns recoverLockedTask reads: the row lock
+			// is taken regardless, and a stale task's checkpoint is the largest
+			// blob in the schema — one this transaction is about to NULL anyway.
+			// SKIP LOCKED: every worker scans the same deterministic candidate
+			// list, so without it N-1 workers serialize behind each row lock for
+			// no recoveries. A locked row is already being recovered by someone.
+			locked := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+				Select("id", "status", "run_version", "current_step_id")
+			if err := staleTaskQuery(locked, now, before).
 				Where("id = ?", candidates[index].ID).
 				First(&task).Error; err != nil {
+				// Not found here means already claimed, already recovered, or
+				// locked by a peer thanks to SKIP LOCKED — all benign.
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return nil
 				}
 				return err
 			}
-			return store.recoverLockedTask(tx, task, now)
+			if err := store.recoverLockedTask(tx, task, now); err != nil {
+				return err
+			}
+			transitioned = true
+			return nil
 		})
 		// ErrConflict just means another worker won the race, which is the
 		// expected outcome of concurrent recovery rather than a failure.
-		if err != nil && !errors.Is(err, ErrConflict) && firstErr == nil {
-			firstErr = err
+		if err != nil && !errors.Is(err, ErrConflict) && *firstErr == nil {
+			*firstErr = err
+		}
+		if err == nil && transitioned {
+			recovered++
 		}
 	}
-	return firstErr
+	return recovered, nil
 }
 
 func staleTaskQuery(query *gorm.DB, now, before time.Time) *gorm.DB {
@@ -1230,7 +1305,13 @@ const CheckpointSchemaVersion = "gopherai_task_agent_v1"
 var checkpointEnvelopePrefix = []byte(CheckpointSchemaVersion + "\n")
 
 // encodeCheckpointEnvelope tags a raw Eino blob with the schema that wrote it.
+// An empty checkpoint stays empty: wrapping it would make GetCheckpoint report
+// a present-but-empty blob, which suppresses WithForceNewRun and hands Eino
+// nothing to deserialize. "No checkpoint" must keep round-tripping as absent.
 func encodeCheckpointEnvelope(checkpoint []byte) []byte {
+	if len(checkpoint) == 0 {
+		return nil
+	}
 	envelope := make([]byte, 0, len(checkpointEnvelopePrefix)+len(checkpoint))
 	envelope = append(envelope, checkpointEnvelopePrefix...)
 	return append(envelope, checkpoint...)
@@ -1238,13 +1319,17 @@ func encodeCheckpointEnvelope(checkpoint []byte) []byte {
 
 // decodeCheckpointEnvelope returns the raw Eino blob only when it was written
 // by the current schema. Legacy rows stored before envelopes existed have no
-// prefix and are therefore correctly reported as undecodable.
+// prefix and are therefore correctly reported as undecodable. The payload
+// aliases stored, whose only caller owns it for the length of the call.
 func decodeCheckpointEnvelope(stored []byte) ([]byte, bool) {
 	if !bytes.HasPrefix(stored, checkpointEnvelopePrefix) {
 		return nil, false
 	}
 	payload := stored[len(checkpointEnvelopePrefix):]
-	return append([]byte(nil), payload...), true
+	if len(payload) == 0 {
+		return nil, false
+	}
+	return payload, true
 }
 
 func (store *GormStore) GetCheckpoint(ctx context.Context, taskID string) ([]byte, bool, error) {
@@ -1327,9 +1412,22 @@ var immutableTaskColumns = map[string]struct{}{
 	"run_version": {}, "runversion": {}, "checkpoint": {}, "checkpoint_version": {}, "checkpointversion": {},
 }
 
+// immutableStepColumns also fences the reviewed payload and the trusted policy
+// snapshot. UpdateStepFenced takes a caller-supplied map, so without this the
+// approval digest binding would hold only because no current caller happens to
+// pass those keys. savePlan writes them at creation and MarkPolicyReviewFenced
+// replaces them through its own statement; neither needs the generic path.
 var immutableStepColumns = map[string]struct{}{
 	"id": {}, "task_id": {}, "taskid": {}, "user_name": {}, "username": {},
 	"sequence": {}, "created_at": {}, "createdat": {},
+	"tool_name": {}, "toolname": {},
+	"tool_arguments_json": {}, "toolargumentsjson": {},
+	"arguments_digest": {}, "argumentsdigest": {},
+	"risk_level": {}, "risklevel": {},
+	"requires_approval": {}, "requiresapproval": {},
+	"read_only": {}, "readonly": {},
+	"idempotent": {}, "destructive": {},
+	"approval_decision": {}, "approvaldecision": {},
 }
 
 func sanitizedUpdates(source map[string]any, immutable map[string]struct{}) map[string]any {
