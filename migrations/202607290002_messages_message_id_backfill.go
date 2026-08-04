@@ -11,10 +11,21 @@ import (
 // messages. It does not depend on the Go model so it also repairs legacy rows
 // created before MessageID was added to model.Message.
 func messagesMessageIDBackfill(ctx context.Context, db *gorm.DB) error {
-	if err := db.WithContext(ctx).Exec(
-		"ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_id VARCHAR(36) NULL",
-	).Error; err != nil {
+	// MySQL has no ADD COLUMN IF NOT EXISTS (that is MariaDB/PostgreSQL syntax),
+	// so existence is probed the same way this file already probes the unique
+	// index below. Editing this released migration is safe precisely because the
+	// old statement was invalid on MySQL: no database can have recorded it.
+	var columnCount int64
+	if err := db.WithContext(ctx).Raw(`SELECT COUNT(*) FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'messages' AND COLUMN_NAME = 'message_id'`).Scan(&columnCount).Error; err != nil {
 		return err
+	}
+	if columnCount == 0 {
+		if err := db.WithContext(ctx).Exec(
+			"ALTER TABLE messages ADD COLUMN message_id VARCHAR(36) NULL",
+		).Error; err != nil {
+			return err
+		}
 	}
 	if err := db.WithContext(ctx).Exec(
 		"UPDATE messages SET message_id = UUID() WHERE message_id IS NULL OR TRIM(message_id) = ''",
