@@ -22,6 +22,13 @@ type CreateTaskRequest struct {
 	ModelID string `json:"model_id" binding:"required"`
 }
 
+// ApproveStepRequest binds an approval to the arguments the client rendered.
+// The digest is required so a stale page or a replayed request cannot authorize
+// a payload the reviewer never actually saw.
+type ApproveStepRequest struct {
+	ExpectedDigest string `json:"expected_digest" binding:"required"`
+}
+
 type RejectStepRequest struct {
 	Reason string `json:"reason,omitempty"`
 }
@@ -129,6 +136,11 @@ func GetTask(c *gin.Context) {
 }
 
 func ApproveStep(c *gin.Context) {
+	request := new(ApproveStepRequest)
+	if err := bindLimitedJSON(c, request); err != nil {
+		writeError(c, agentservice.ErrInvalidInput)
+		return
+	}
 	service, err := getDefaultService()
 	if err != nil {
 		writeError(c, err)
@@ -136,6 +148,7 @@ func ApproveStep(c *gin.Context) {
 	}
 	task, err := service.ApproveTask(
 		c.Request.Context(), c.GetString("userName"), c.Param("taskID"), c.Param("stepID"),
+		strings.TrimSpace(request.ExpectedDigest),
 	)
 	if err != nil {
 		writeError(c, err)

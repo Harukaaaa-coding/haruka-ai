@@ -55,5 +55,11 @@ func All() []Definition {
 			Revision: "v1",
 			Up:       agentStepOperationID,
 		},
+		{
+			Version:  "202608040002",
+			Name:     "agent_task_pending_scan_index",
+			Revision: "v1",
+			Up:       agentTaskPendingScanIndex,
+		},
 	}
 }

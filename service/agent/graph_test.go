@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -346,9 +347,12 @@ func (store *graphTestStore) UpdateOwnedTask(_ context.Context, userName, taskID
 	return nil
 }
 
-func (store *graphTestStore) UpdateOwnedStepDecision(_ context.Context, userName, taskID, stepID, decision, reason string) (*model.AgentStep, error) {
+func (store *graphTestStore) UpdateOwnedStepDecision(_ context.Context, userName, taskID, stepID, decision, reason, expectedDigest string) (*model.AgentStep, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if decision == model.AgentApprovalDecisionApproved && expectedDigest == "" {
+		return nil, agentdao.ErrInvalidInput
+	}
 	task := store.tasks[taskID]
 	if task == nil || task.UserName != userName {
 		return nil, gorm.ErrRecordNotFound
@@ -358,6 +362,10 @@ func (store *graphTestStore) UpdateOwnedStepDecision(_ context.Context, userName
 	}
 	step := graphTestStep(task, stepID)
 	if step == nil || step.Status != model.AgentStepStatusWaitingApproval {
+		return nil, agentdao.ErrConflict
+	}
+	// Mirror the store's CAS predicate so tests exercise the digest binding.
+	if expectedDigest != "" && !strings.EqualFold(step.ArgumentsDigest, expectedDigest) {
 		return nil, agentdao.ErrConflict
 	}
 	step.ApprovalDecision = decision
@@ -677,7 +685,7 @@ func TestGraphApprovalInterruptAndCheckpointResume(t *testing.T) {
 	if gateway.calls != 0 || store.setCalls == 0 {
 		t.Fatalf("tool ran before approval or checkpoint missing: calls=%d sets=%d", gateway.calls, store.setCalls)
 	}
-	if _, err := service.ApproveTask(context.Background(), "alice", task.ID, step.ID); err != nil {
+	if _, err := service.ApproveTask(context.Background(), "alice", task.ID, step.ID, step.ArgumentsDigest); err != nil {
 		t.Fatalf("ApproveTask: %v", err)
 	}
 	if err := service.ProcessTask(context.Background(), task.ID); err != nil {
@@ -689,6 +697,63 @@ func TestGraphApprovalInterruptAndCheckpointResume(t *testing.T) {
 	}
 	if completed.Status != model.AgentTaskStatusSucceeded || gateway.calls != 1 || !gateway.tokenSeen {
 		t.Fatalf("approval resume failed: task=%#v calls=%d token=%v", completed, gateway.calls, gateway.tokenSeen)
+	}
+}
+
+// TestGraphApprovalRequiresMatchingArgumentsDigest pins the confirmation
+// binding: an approval only authorizes the exact arguments the human reviewed,
+// so a blank or stale digest must never reach the tool.
+func TestGraphApprovalRequiresMatchingArgumentsDigest(t *testing.T) {
+	definition := graphTestDefinition("danger.write", hub.RiskHigh, true, false, false, true)
+	service, _, _, gateway := newGraphTestService(t, definition, []graphTestReply{
+		{content: graphTestToolPlan(definition.Name)},
+		{content: "approved result"},
+	})
+	task, err := service.CreateTask(context.Background(), "alice", "perform approved action", "test.chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ProcessTask(context.Background(), task.ID); err != nil {
+		t.Fatalf("first ProcessTask: %v", err)
+	}
+	waiting, err := service.GetTask(context.Background(), "alice", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := graphTestToolStep(waiting)
+	if step == nil || step.ArgumentsDigest == "" {
+		t.Fatalf("approval step has no arguments digest: %#v", step)
+	}
+
+	if _, err := service.ApproveTask(context.Background(), "alice", task.ID, step.ID, ""); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("blank digest approval error = %v, want ErrInvalidInput", err)
+	}
+	staleDigest := strings.Repeat("a", len(step.ArgumentsDigest))
+	if _, err := service.ApproveTask(context.Background(), "alice", task.ID, step.ID, staleDigest); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale digest approval error = %v, want ErrConflict", err)
+	}
+
+	stillWaiting, err := service.GetTask(context.Background(), "alice", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillWaiting.Status != model.AgentTaskStatusWaitingApproval || gateway.calls != 0 {
+		t.Fatalf("rejected approval leaked through: task=%#v calls=%d", stillWaiting, gateway.calls)
+	}
+
+	// The digest the reviewer actually saw still works.
+	if _, err := service.ApproveTask(context.Background(), "alice", task.ID, step.ID, step.ArgumentsDigest); err != nil {
+		t.Fatalf("matching digest ApproveTask: %v", err)
+	}
+	if err := service.ProcessTask(context.Background(), task.ID); err != nil {
+		t.Fatalf("resumed ProcessTask: %v", err)
+	}
+	completed, err := service.GetTask(context.Background(), "alice", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Status != model.AgentTaskStatusSucceeded || gateway.calls != 1 {
+		t.Fatalf("approved run did not complete once: task=%#v calls=%d", completed, gateway.calls)
 	}
 }
 
@@ -825,7 +890,7 @@ func TestGraphPolicyDriftRequiresReviewAndFreshApproval(t *testing.T) {
 	if waiting.Status != model.AgentTaskStatusWaitingApproval || step.Status != model.AgentStepStatusWaitingApproval || gateway.calls != 0 {
 		t.Fatalf("refreshed high-risk policy did not require approval: %#v", waiting)
 	}
-	if _, err := service.ApproveTask(context.Background(), "alice", task.ID, step.ID); err != nil {
+	if _, err := service.ApproveTask(context.Background(), "alice", task.ID, step.ID, step.ArgumentsDigest); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.ProcessTask(context.Background(), task.ID); err != nil {

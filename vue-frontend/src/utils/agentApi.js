@@ -44,9 +44,13 @@ export const getAgentTask = (taskId, { signal } = {}) =>
 export const createAgentTask = ({ goal, model_id: modelId }) =>
   request(api.post('/agent/tasks', { goal, model_id: modelId }), '创建 Agent 任务失败')
 
-export const approveAgentStep = (taskId, stepId) =>
+// expectedDigest must be the arguments_digest the user actually saw. The server
+// rejects the approval if it no longer matches the pending step.
+export const approveAgentStep = (taskId, stepId, expectedDigest) =>
   request(
-    api.post(`/agent/tasks/${encoded(taskId)}/steps/${encoded(stepId)}/approve`),
+    api.post(`/agent/tasks/${encoded(taskId)}/steps/${encoded(stepId)}/approve`, {
+      expected_digest: expectedDigest
+    }),
     '批准步骤失败'
   )
 

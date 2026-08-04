@@ -2,6 +2,7 @@ package agent
 
 import (
 	"GopherAI/model"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -141,6 +142,34 @@ func TestNormalizePlanStepsOwnsAndResetsRuntimeState(t *testing.T) {
 	}
 	if step.ApprovalDecision != model.AgentApprovalDecisionPending || step.ApprovalDecidedAt != nil {
 		t.Fatalf("approval state was not reset: %#v", step)
+	}
+}
+
+// TestCheckpointEnvelopeIsolatesGraphVersions pins the upgrade behavior: a blob
+// written by another graph version (or before envelopes existed) must read back
+// as absent so the worker starts a fresh run instead of failing the task on a
+// deserialization error.
+func TestCheckpointEnvelopeIsolatesGraphVersions(t *testing.T) {
+	raw := []byte{0x00, 0x01, '\n', 0xff, 'e', 'i', 'n', 'o'}
+	decoded, ok := decodeCheckpointEnvelope(encodeCheckpointEnvelope(raw))
+	if !ok || !bytes.Equal(decoded, raw) {
+		t.Fatalf("round trip = (%v, %v), want the original blob", decoded, ok)
+	}
+
+	for _, test := range []struct {
+		name   string
+		stored []byte
+	}{
+		{name: "legacy blob without envelope", stored: raw},
+		{name: "other graph version", stored: []byte("gopherai_task_agent_v2\npayload")},
+		{name: "version without separator", stored: []byte(CheckpointSchemaVersion + "payload")},
+		{name: "empty", stored: nil},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if _, ok := decodeCheckpointEnvelope(test.stored); ok {
+				t.Fatalf("decodeCheckpointEnvelope(%q) reported a decodable checkpoint", test.stored)
+			}
+		})
 	}
 }
 

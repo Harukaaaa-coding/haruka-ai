@@ -581,7 +581,9 @@ export default {
           { confirmButtonText: '批准并继续', cancelButtonText: '取消', type: step.destructive ? 'warning' : 'info' }
         )
         actionLoading.value = true
-        await approveAgentStep(selectedTask.value.id, step.id)
+        // Echo back the digest rendered in this dialog so the server can refuse
+        // the approval if the step changed while it was open.
+        await approveAgentStep(selectedTask.value.id, step.id, step.arguments_digest)
         ElMessage.success('已批准，任务将继续执行')
         await refreshAll()
       } catch (error) {

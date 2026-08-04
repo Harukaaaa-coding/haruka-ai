@@ -74,7 +74,7 @@ type Store interface {
 	MarkExecutionUnknownFenced(ctx context.Context, taskID, stepID string, runVersion uint64, message string) error
 	MarkPolicyReviewFenced(ctx context.Context, taskID, stepID string, runVersion uint64, message, risk string, requiresApproval, readOnly, idempotent, destructive bool) error
 	UpdateOwnedTask(ctx context.Context, userName, taskID string, updates map[string]any) error
-	UpdateOwnedStepDecision(ctx context.Context, userName, taskID, stepID, decision, reason string) (*model.AgentStep, error)
+	UpdateOwnedStepDecision(ctx context.Context, userName, taskID, stepID, decision, reason, expectedDigest string) (*model.AgentStep, error)
 	ResumeOwnedTask(ctx context.Context, userName, taskID string, retryUnknown bool) error
 	CancelOwnedTask(ctx context.Context, userName, taskID string) error
 	RecoverStaleTasks(ctx context.Context, staleBefore time.Time) error
