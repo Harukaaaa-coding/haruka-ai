@@ -263,8 +263,8 @@ func TestAgentJSONHidesDurableSensitiveState(t *testing.T) {
 
 func TestUninitializedStoreReturnsStableError(t *testing.T) {
 	store := NewStore(nil)
-	if _, err := store.ListPendingTasks(context.Background(), 1); !errors.Is(err, ErrDatabaseUnavailable) {
-		t.Fatalf("ListPendingTasks() error = %v", err)
+	if _, err := store.ListPendingTaskIDs(context.Background(), 1); !errors.Is(err, ErrDatabaseUnavailable) {
+		t.Fatalf("ListPendingTaskIDs() error = %v", err)
 	}
 	if err := store.MarkExecutionUnknownFenced(context.Background(), "task-1", "step-1", 1, "unknown"); !errors.Is(err, ErrDatabaseUnavailable) {
 		t.Fatalf("MarkExecutionUnknownFenced() error = %v", err)

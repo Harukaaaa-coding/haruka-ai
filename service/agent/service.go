@@ -185,10 +185,17 @@ func (service *Service) ListTasks(ctx context.Context, userName, status string, 
 	return all[offset:end], total, nil
 }
 
-// ApproveTask requires the caller to echo back the arguments digest it
-// displayed to the human. The digest is re-checked here for a precise error and
-// again inside the store's CAS predicate, which is what actually makes a stale
-// or replayed approval fail instead of authorizing arguments nobody reviewed.
+// ApproveTask requires the caller to echo back the arguments digest it was
+// served for this step. The digest is re-checked here for a precise error and
+// again inside the store's CAS predicate, which is the part that actually
+// enforces it.
+//
+// What this proves and what it does not: a step's digest is written once at plan
+// time and immutableStepColumns keeps it that way, so the binding demonstrates
+// the caller is approving the step revision it was served, and it makes a
+// replayed or blind approval fail. It is not proof the human read the exact
+// payload — the UI shows a redacted preview and cannot recompute the digest
+// itself, so it echoes an opaque server-supplied value.
 func (service *Service) ApproveTask(ctx context.Context, userName, taskID, stepID, expectedDigest string) (*model.AgentTask, error) {
 	expectedDigest = strings.ToLower(strings.TrimSpace(expectedDigest))
 	if expectedDigest == "" {

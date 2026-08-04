@@ -174,11 +174,19 @@ POST /agent/tasks/:taskID/steps/:stepID/approve
 
 **验证**：`TestGraphApprovalRequiresMatchingArgumentsDigest`。变异测试确认——摘掉 service 前置校验后测试仍通过，说明真正拦住的是 store 层 CAS。
 
+**这个控制究竟证明了什么（审查后修正）**：
+
+`arguments_digest` 在计划阶段写入一次，之后 `immutableStepColumns` 保证它不可被 `UpdateStepFenced` 改写。所以绑定证明的是**「调用方批准的是它被服务端发过的那个步骤版本」**，并且让重放的、或盲目构造的审批请求失败。
+
+它**不**证明「人看到了这份确切参数」——UI 展示的是脱敏截断后的 `arguments_preview`，浏览器无法自己重算摘要，只是把服务端给的不透明值原样回传。要做到真正的 WYSIWYG 审批，需要让前端基于展示内容自行计算摘要，那是另一个量级的改动。
+
 ### 修复 2：Checkpoint 版本信封
 
 **问题**：卡在 `waiting_approval` 的任务不走清存档路径。图升级后批准 → 加载旧格式 checkpoint → 反序列化失败 → 任务莫名 `failed`，用户须再手动 resume 才自愈。
 
-**修复**：给存储的 blob 加 schema 版本头，版本不匹配时 `Get` 返回「不存在」，让 Worker 直接走 `ForceNewRun`。因为跳过逻辑完全基于 MySQL，从头跑是安全的。
+**根因修复（审查后追加）**：批准是**唯一**一条「恢复任务却不作废 checkpoint」的转换。`UpdateOwnedStepDecision` 的批准分支现在也写 `checkpoint: nil`，与 `RecoverStaleTasks` / `ResumeOwnedTask` 对齐——这才是这个 bug 的根因，一行解决。
+
+**纵深防御**：给存储的 blob 加 schema 版本头，版本不匹配时 `Get` 返回「不存在」，让 Worker 直接走 `ForceNewRun`。因为跳过逻辑完全基于 MySQL，从头跑是安全的。这条覆盖的是根因修复够不到的窗口：running/planning 任务的 blob 被新二进制读到、而 `RecoverStaleTasks` 尚未触发（默认最长 10 分钟）。
 
 ```go
 const CheckpointSchemaVersion = "gopherai_task_agent_v1"
@@ -235,8 +243,16 @@ var checkpointEnvelopePrefix = []byte(CheckpointSchemaVersion + "\n")
 
 | # | 问题 | 位置 | 建议 |
 |---|---|---|---|
-| 5 | `SetCheckpoint` 缺 lease 围栏（与其他写不对称）。审批节点故意先释放租约所致，代码已有注释说明取舍 | `dao:1201` | 可接受；固化行为的测试需要真实 DB，随 E2E 一起补 |
-| 8 | 多 Worker 惊群：都拉同一批 pending 再抢 | `worker.go:91` | 量大时加分片或随机化。当前 `RowsAffected` 定胜负是正确的，只是浪费 |
+| 5 | `SetCheckpoint` 缺 lease 围栏（与其他写不对称）。审批节点故意先释放租约所致，代码已有注释说明取舍 | `dao` | 可接受；固化行为的测试需要真实 DB，随 E2E 一起补 |
+| 8 | 多 Worker 惊群：都拉同一批 pending 再抢 | `worker.go` | 量大时加分片或随机化。当前 `RowsAffected` 定胜负是正确的，只是浪费 |
+| 9 | **回收失败完全不可观测**：`RecoverStaleTasks` 精心聚合了 `firstErr`，调用方却 `_ =` 丢弃。DB 故障导致任务永久卡在 `running` 时，无日志无指标 | `worker.go` | 本仓库 service 层无日志设施，需先定选型；这是审查中优先级最高的遗留项 |
+| 10 | `CheckpointSchemaVersion` 靠人工维护，改图不改常量则守卫失效（正是它要防的场景）| `dao` / `graph.go` | 加一个对编译后图结构做哈希的黄金测试，或至少加 CI 检查 |
+| 11 | 回收扫描的谓词不可 sargable（`OR` + `COALESCE`），`ORDER BY updated_at` 无索引 | `dao` | 考虑物化 `stale_at` 生成列并建 `(status, stale_at)` 索引，一次紧凑范围扫描即可 |
+| 12 | `recoverStaleBatchSize` / `MaxRounds` 是硬编码常量，而同一轮询里的其他旋钮都走 `WorkerOptions` | `dao` | 挪进 `WorkerOptions` 以便测试和运维调优 |
+
+### 滚动发布注意
+
+Checkpoint 信封是**向前兼容、不向后兼容**的：新 Worker 能识别旧 blob（当作不可解码 → 重跑），但**旧 Worker 读到新 blob 会反序列化失败**，任务变 `failed`（需手动 resume）。混合舰队期间存在这个窗口。影响有界（MySQL 仍是权威，不会重复执行副作用），但滚动发布时应留意，或选择低峰期部署。
 
 **E2E 测试未覆盖场景**（建议补）：多 Worker 并发抢同一任务、崩溃发生在 `waiting_approval`、图升级后的 checkpoint 不兼容。
 

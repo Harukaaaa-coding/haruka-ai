@@ -178,13 +178,13 @@ func (store *graphTestStore) ListOwnedTasks(_ context.Context, userName string, 
 	return all[offset:end], total, nil
 }
 
-func (store *graphTestStore) ListPendingTasks(_ context.Context, limit int) ([]model.AgentTask, error) {
+func (store *graphTestStore) ListPendingTaskIDs(_ context.Context, limit int) ([]string, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	result := make([]model.AgentTask, 0, limit)
+	result := make([]string, 0, limit)
 	for _, task := range store.tasks {
 		if task.Status == model.AgentTaskStatusPending && len(result) < limit {
-			result = append(result, *cloneGraphTestTask(task))
+			result = append(result, task.ID)
 		}
 	}
 	return result, nil
@@ -365,7 +365,10 @@ func (store *graphTestStore) UpdateOwnedStepDecision(_ context.Context, userName
 		return nil, agentdao.ErrConflict
 	}
 	// Mirror the store's CAS predicate so tests exercise the digest binding.
-	if expectedDigest != "" && !strings.EqualFold(step.ArgumentsDigest, expectedDigest) {
+	// EqualFold, not ==: the real predicate is SQL equality on a char(64) under
+	// MySQL's default case-insensitive collation, and a stricter fake would
+	// certify case handling production does not actually enforce.
+	if decision == model.AgentApprovalDecisionApproved && !strings.EqualFold(step.ArgumentsDigest, expectedDigest) {
 		return nil, agentdao.ErrConflict
 	}
 	step.ApprovalDecision = decision
