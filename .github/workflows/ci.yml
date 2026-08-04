@@ -43,6 +43,42 @@ jobs:
       - name: 测试
         run: go test -race ./...
 
+  agent-recovery-e2e:
+    name: Agent 崩溃恢复 E2E（真实 MySQL）
+    runs-on: ubuntu-latest
+
+    # 这个测试 fork 真实子进程、SIGKILL 掉它，再由第二个进程接管续跑。
+    # 它是「非幂等工具绝不自动重放」这条安全不变量的唯一端到端证明，
+    # 因此必须常态化运行，不能只靠开发者本地手动开启。
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: gopherai
+          MYSQL_DATABASE: gopherai_agent_e2e
+        ports:
+          - 13306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pgopherai"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # -count=1 关闭结果缓存：恢复行为依赖真实时序与外部数据库状态，
+      # 缓存命中会让这个测试静默失去意义。
+      - name: 崩溃—重启—续跑
+        env:
+          GOPHERAI_AGENT_E2E_MYSQL_DSN: root:gopherai@tcp(127.0.0.1:13306)/gopherai_agent_e2e?parseTime=true&loc=UTC
+        run: go test -tags integration ./service/agent -run TestAgentProcessCrashRecovery -count=1 -v
+
   mcp-module:
     name: MCP 子模块
     runs-on: ubuntu-latest

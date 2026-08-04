@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	hub "GopherAI/common/mcphub"
+	agentdao "GopherAI/dao/agent"
 	"GopherAI/model"
 
 	"github.com/cloudwego/eino/compose"
@@ -91,9 +92,12 @@ func (service *Service) buildGraph(ctx context.Context) (compose.Runnable[string
 		return nil, err
 	}
 
+	// The graph name doubles as the checkpoint schema version, so changing the
+	// structure below forces a matching bump of the constant that decides
+	// whether a stored blob is still decodable.
 	return graph.Compile(
 		ctx,
-		compose.WithGraphName("gopherai_task_agent_v1"),
+		compose.WithGraphName(agentdao.CheckpointSchemaVersion),
 		compose.WithNodeTriggerMode(compose.AnyPredecessor),
 		compose.WithMaxRunSteps(service.maxRunSteps),
 		compose.WithCheckPointStore(service.store),

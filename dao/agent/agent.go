@@ -3,6 +3,7 @@ package agent
 import (
 	"GopherAI/common/mysql"
 	"GopherAI/model"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -26,6 +27,10 @@ const (
 	defaultPendingLimit    = 20
 	defaultLeaseDuration   = 2 * time.Minute
 	maxApprovalReasonRunes = 500
+
+	// recoverStaleBatchSize bounds how many abandoned tasks a single poll
+	// recovers. Anything left over is picked up by the next poll.
+	recoverStaleBatchSize = 50
 )
 
 // GormStore contains all durable Agent state operations. Supplying the DB
@@ -711,15 +716,27 @@ func (store *GormStore) UpdateOwnedTask(ctx context.Context, userName, taskID st
 // UpdateOwnedStepDecision is the durable human-in-the-loop decision. It does
 // not create or persist an MCP approval token. The worker creates and consumes
 // that short-lived token only immediately before the approved invocation.
-func (store *GormStore) UpdateOwnedStepDecision(ctx context.Context, userName, taskID, stepID, decision, reason string) (*model.AgentStep, error) {
+//
+// expectedDigest binds an approval to the exact arguments the human reviewed.
+// It is mandatory for approve and is folded into the same CAS predicate as the
+// status check, so a replayed or stale approval cannot authorize a payload the
+// reviewer never saw. Reject deliberately does not require it: stopping a task
+// must stay possible from a stale UI.
+func (store *GormStore) UpdateOwnedStepDecision(ctx context.Context, userName, taskID, stepID, decision, reason, expectedDigest string) (*model.AgentStep, error) {
 	db, err := store.database()
 	if err != nil {
 		return nil, err
 	}
 	userName = strings.TrimSpace(userName)
 	decision = strings.TrimSpace(strings.ToLower(decision))
+	// Digests are always written as lower-case hex, so a normalized equality
+	// predicate stays index-friendly instead of forcing LOWER() on the column.
+	expectedDigest = strings.ToLower(strings.TrimSpace(expectedDigest))
 	if userName == "" || strings.TrimSpace(taskID) == "" || strings.TrimSpace(stepID) == "" ||
 		(decision != model.AgentApprovalDecisionApproved && decision != model.AgentApprovalDecisionRejected) {
+		return nil, ErrInvalidInput
+	}
+	if decision == model.AgentApprovalDecisionApproved && expectedDigest == "" {
 		return nil, ErrInvalidInput
 	}
 	now := store.currentTime()
@@ -746,10 +763,14 @@ func (store *GormStore) UpdateOwnedStepDecision(ctx context.Context, userName, t
 			finishedAt = &now
 			taskError = "tool execution was rejected"
 		}
-		stepResult := tx.Model(&model.AgentStep{}).
+		stepQuery := tx.Model(&model.AgentStep{}).
 			Where("id = ? AND task_id = ? AND user_name = ? AND status = ? AND approval_decision IN ?",
 				stepID, taskID, userName, model.AgentStepStatusWaitingApproval,
-				[]string{"", model.AgentApprovalDecisionPending}).
+				[]string{"", model.AgentApprovalDecisionPending})
+		if expectedDigest != "" {
+			stepQuery = stepQuery.Where("arguments_digest = ?", expectedDigest)
+		}
+		stepResult := stepQuery.
 			Updates(map[string]any{
 				"status":              stepStatus,
 				"approval_decision":   decision,
@@ -995,22 +1016,51 @@ func (store *GormStore) RecoverStaleTasks(ctx context.Context, before time.Time)
 		return ErrInvalidInput
 	}
 	now := store.currentTime()
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var tasks []model.AgentTask
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("status IN ?", staleRecoverableTaskStatuses()).
-			Where("(lease_until IS NOT NULL AND lease_until < ?) OR (lease_until IS NULL AND COALESCE(heartbeat_at, started_at, updated_at) < ?)", now, before.UTC()).
-			Order("updated_at ASC, id ASC").
-			Find(&tasks).Error; err != nil {
-			return err
+
+	// Candidates are scanned without row locks so a large backlog cannot turn
+	// recovery into a single long transaction holding a lock on every stale row.
+	var candidates []model.AgentTask
+	if err := staleTaskQuery(db.WithContext(ctx).Select("id"), now, before).
+		Order("updated_at ASC, id ASC").
+		Limit(recoverStaleBatchSize).
+		Find(&candidates).Error; err != nil {
+		return err
+	}
+
+	var firstErr error
+	for index := range candidates {
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
-		for index := range tasks {
-			if err := store.recoverLockedTask(tx, tasks[index], now); err != nil {
+		// One transaction per task: a row that another worker already claimed,
+		// or that fails to recover, must not roll back the rest of the batch.
+		err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var task model.AgentTask
+			// Staleness is re-checked under the row lock because the scan above
+			// held none; the task may have been claimed or recovered since.
+			if err := staleTaskQuery(tx.Clauses(clause.Locking{Strength: "UPDATE"}), now, before).
+				Where("id = ?", candidates[index].ID).
+				First(&task).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return nil
+				}
 				return err
 			}
+			return store.recoverLockedTask(tx, task, now)
+		})
+		// ErrConflict just means another worker won the race, which is the
+		// expected outcome of concurrent recovery rather than a failure.
+		if err != nil && !errors.Is(err, ErrConflict) && firstErr == nil {
+			firstErr = err
 		}
-		return nil
-	})
+	}
+	return firstErr
+}
+
+func staleTaskQuery(query *gorm.DB, now, before time.Time) *gorm.DB {
+	return query.Model(&model.AgentTask{}).
+		Where("status IN ?", staleRecoverableTaskStatuses()).
+		Where("(lease_until IS NOT NULL AND lease_until < ?) OR (lease_until IS NULL AND COALESCE(heartbeat_at, started_at, updated_at) < ?)", now, before.UTC())
 }
 
 func (store *GormStore) recoverLockedTask(tx *gorm.DB, task model.AgentTask, now time.Time) error {
@@ -1171,6 +1221,32 @@ func activeLeaseFenceFromContext(ctx context.Context, taskID string, runVersion 
 	return workerID, true
 }
 
+// CheckpointSchemaVersion identifies the compiled graph that produced a stored
+// Eino blob. Bump it whenever service/agent/graph.go changes its node set,
+// edges, interrupt points or GraphState shape. Blobs carrying any other version
+// are reported as absent rather than handed to a graph that cannot decode them.
+const CheckpointSchemaVersion = "gopherai_task_agent_v1"
+
+var checkpointEnvelopePrefix = []byte(CheckpointSchemaVersion + "\n")
+
+// encodeCheckpointEnvelope tags a raw Eino blob with the schema that wrote it.
+func encodeCheckpointEnvelope(checkpoint []byte) []byte {
+	envelope := make([]byte, 0, len(checkpointEnvelopePrefix)+len(checkpoint))
+	envelope = append(envelope, checkpointEnvelopePrefix...)
+	return append(envelope, checkpoint...)
+}
+
+// decodeCheckpointEnvelope returns the raw Eino blob only when it was written
+// by the current schema. Legacy rows stored before envelopes existed have no
+// prefix and are therefore correctly reported as undecodable.
+func decodeCheckpointEnvelope(stored []byte) ([]byte, bool) {
+	if !bytes.HasPrefix(stored, checkpointEnvelopePrefix) {
+		return nil, false
+	}
+	payload := stored[len(checkpointEnvelopePrefix):]
+	return append([]byte(nil), payload...), true
+}
+
 func (store *GormStore) GetCheckpoint(ctx context.Context, taskID string) ([]byte, bool, error) {
 	db, err := store.database()
 	if err != nil {
@@ -1186,7 +1262,15 @@ func (store *GormStore) GetCheckpoint(ctx context.Context, taskID string) ([]byt
 	if len(task.Checkpoint) == 0 {
 		return nil, false, nil
 	}
-	checkpoint := append([]byte(nil), task.Checkpoint...)
+	checkpoint, decodable := decodeCheckpointEnvelope(task.Checkpoint)
+	if !decodable {
+		// Written by a different graph version, so the current graph cannot
+		// resume from it. Reporting it as absent makes the worker start a fresh
+		// run instead of failing the task on a deserialization error. This is
+		// safe because MySQL step rows stay authoritative and already skip work
+		// that completed durably.
+		return nil, false, nil
+	}
 	return checkpoint, true, nil
 }
 
@@ -1213,7 +1297,7 @@ func (store *GormStore) SetCheckpoint(ctx context.Context, taskID string, checkp
 	// remains the fence here so a later claim, cancellation, or recovery still
 	// rejects a stale checkpoint write.
 	result := query.Updates(map[string]any{
-		"checkpoint":         append([]byte(nil), checkpoint...),
+		"checkpoint":         encodeCheckpointEnvelope(checkpoint),
 		"checkpoint_version": gorm.Expr("checkpoint_version + 1"),
 		"updated_at":         store.currentTime(),
 	})

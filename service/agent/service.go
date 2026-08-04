@@ -185,7 +185,15 @@ func (service *Service) ListTasks(ctx context.Context, userName, status string, 
 	return all[offset:end], total, nil
 }
 
-func (service *Service) ApproveTask(ctx context.Context, userName, taskID, stepID string) (*model.AgentTask, error) {
+// ApproveTask requires the caller to echo back the arguments digest it
+// displayed to the human. The digest is re-checked here for a precise error and
+// again inside the store's CAS predicate, which is what actually makes a stale
+// or replayed approval fail instead of authorizing arguments nobody reviewed.
+func (service *Service) ApproveTask(ctx context.Context, userName, taskID, stepID, expectedDigest string) (*model.AgentTask, error) {
+	expectedDigest = strings.ToLower(strings.TrimSpace(expectedDigest))
+	if expectedDigest == "" {
+		return nil, fmt.Errorf("%w: expected arguments digest is required to approve a step", ErrInvalidInput)
+	}
 	task, step, err := service.ownedApprovalStep(ctx, userName, taskID, stepID)
 	if err != nil {
 		return nil, err
@@ -193,7 +201,10 @@ func (service *Service) ApproveTask(ctx context.Context, userName, taskID, stepI
 	if !step.RequiresApproval || task.Status != model.AgentTaskStatusWaitingApproval || step.Status != model.AgentStepStatusWaitingApproval {
 		return nil, fmt.Errorf("%w: step is not waiting for approval", ErrConflict)
 	}
-	if _, err := service.store.UpdateOwnedStepDecision(ctx, userName, taskID, stepID, model.AgentApprovalDecisionApproved, ""); err != nil {
+	if !strings.EqualFold(strings.TrimSpace(step.ArgumentsDigest), expectedDigest) {
+		return nil, fmt.Errorf("%w: approved arguments no longer match the pending step", ErrConflict)
+	}
+	if _, err := service.store.UpdateOwnedStepDecision(ctx, userName, taskID, stepID, model.AgentApprovalDecisionApproved, "", expectedDigest); err != nil {
 		return nil, service.normalizeStoreError(err)
 	}
 	service.hint(taskID)
@@ -208,7 +219,9 @@ func (service *Service) RejectTask(ctx context.Context, userName, taskID, stepID
 	if !step.RequiresApproval || task.Status != model.AgentTaskStatusWaitingApproval || step.Status != model.AgentStepStatusWaitingApproval {
 		return nil, fmt.Errorf("%w: step is not waiting for approval", ErrConflict)
 	}
-	if _, err := service.store.UpdateOwnedStepDecision(ctx, userName, taskID, stepID, model.AgentApprovalDecisionRejected, truncateRunes(strings.TrimSpace(reason), 500)); err != nil {
+	// Rejection carries no digest on purpose: halting a task must remain
+	// possible from a stale UI, and refusing to run something is always safe.
+	if _, err := service.store.UpdateOwnedStepDecision(ctx, userName, taskID, stepID, model.AgentApprovalDecisionRejected, truncateRunes(strings.TrimSpace(reason), 500), ""); err != nil {
 		return nil, service.normalizeStoreError(err)
 	}
 	return service.GetTask(ctx, userName, taskID)
