@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	agentdao "GopherAI/dao/agent"
@@ -87,16 +88,27 @@ func (service *Service) pollPending(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
-	_ = service.store.RecoverStaleTasks(ctx, service.clock.Now().Add(-service.workerOptions.StaleAfter))
+	// Recovery and polling failures were previously discarded. A database fault
+	// here leaves crashed tasks stuck in running forever, and without a line in
+	// the log that is indistinguishable from an idle, healthy worker.
+	if err := service.store.RecoverStaleTasks(ctx, service.clock.Now().Add(-service.workerOptions.StaleAfter)); err != nil &&
+		!errors.Is(err, context.Canceled) {
+		log.Printf("agent stale recovery failed: worker=%s error=%v", service.workerOptions.ID, err)
+	}
 	taskIDs, err := service.store.ListPendingTaskIDs(ctx, service.workerOptions.BatchSize)
 	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			log.Printf("agent pending poll failed: worker=%s error=%v", service.workerOptions.ID, err)
+		}
 		return
 	}
 	for index := range taskIDs {
 		if ctx.Err() != nil {
 			return
 		}
-		service.processTaskID(ctx, taskIDs[index])
+		if err := service.processTaskID(ctx, taskIDs[index]); err != nil {
+			log.Printf("agent task failed: worker=%s task=%s error=%v", service.workerOptions.ID, taskIDs[index], err)
+		}
 	}
 }
 
