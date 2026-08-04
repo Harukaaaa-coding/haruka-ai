@@ -20,6 +20,10 @@ const (
 	maxToolOutputRunes       = 16_000
 	maxFinalAnswerRunes      = 24_000
 	maxArgumentsPreviewRunes = 4_000
+	// maxMCPRequestIDRunes matches agent_steps.mcp_request_id. A gateway that
+	// returns something wider must not fail the step: for a non-idempotent tool
+	// that would surface as a false execution_unknown and pull in a human.
+	maxMCPRequestIDRunes = 36
 
 	defaultListLimit = 30
 	maxListLimit     = 200
