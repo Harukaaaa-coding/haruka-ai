@@ -378,7 +378,10 @@ func (gateway *agentE2EGateway) Call(ctx context.Context, request hub.InvokeRequ
 		}
 	}
 	return &hub.InvocationResult{
-		RequestID: "e2e-request-" + gateway.taskID,
+		// A real registry mints this with uuid.NewString(), which is exactly the
+		// width of agent_steps.mcp_request_id. Prefixing the task ID overflowed
+		// that column and failed the step for a reason the test never intended.
+		RequestID: uuid.NewString(),
 		ToolName:  request.ToolName,
 		Result:    &mcp.CallToolResult{},
 	}, nil

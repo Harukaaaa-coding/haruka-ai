@@ -409,7 +409,7 @@ func (service *Service) toolNode(ctx context.Context, taskID string) (string, er
 		"status":           model.AgentStepStatusSucceeded,
 		"tool_output_json": safeResult,
 		"result_summary":   truncateRunes(safeResult, maxPlanSummaryRunes),
-		"mcp_request_id":   invocation.RequestID,
+		"mcp_request_id":   truncateRunes(invocation.RequestID, maxMCPRequestIDRunes),
 		"finished_at":      &finished,
 		"error_message":    "",
 	}); err != nil {
