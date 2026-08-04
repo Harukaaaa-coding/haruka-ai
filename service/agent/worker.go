@@ -127,7 +127,7 @@ func (service *Service) processTaskID(parent context.Context, taskID string) err
 		service.unregisterRunning(task.ID)
 	}()
 	ctx = withRunVersion(ctx, task.RunVersion)
-	ctx = agentdao.WithFencingToken(ctx, task.ID, task.RunVersion)
+	ctx = agentdao.WithWorkerFencingToken(ctx, task.ID, task.RunVersion, service.workerOptions.ID)
 
 	err = service.runClaimedTask(ctx, task)
 	if err == nil || errors.Is(err, ErrApprovalPending) || errors.Is(err, ErrTaskStopped) ||

@@ -49,5 +49,11 @@ func All() []Definition {
 			Revision: "v1",
 			Up:       sessionsActivityPaginationIndex,
 		},
+		{
+			Version:  "202608040001",
+			Name:     "agent_step_operation_id",
+			Revision: "v1",
+			Up:       agentStepOperationID,
+		},
 	}
 }

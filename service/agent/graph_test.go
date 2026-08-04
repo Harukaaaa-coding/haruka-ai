@@ -64,6 +64,7 @@ type graphTestMCP struct {
 	resultIsError       bool
 	calls               int
 	tokenSeen           bool
+	operationIDs        []string
 }
 
 func (gateway *graphTestMCP) Tools(context.Context) ([]hub.ToolDefinition, error) {
@@ -85,6 +86,7 @@ func (gateway *graphTestMCP) Call(_ context.Context, request hub.InvokeRequest) 
 	defer gateway.mu.Unlock()
 	gateway.calls++
 	gateway.tokenSeen = gateway.tokenSeen || request.ApprovalToken != ""
+	gateway.operationIDs = append(gateway.operationIDs, request.OperationID)
 	if gateway.callErr != nil {
 		return nil, gateway.callErr
 	}
@@ -511,6 +513,8 @@ func applyGraphTestStepUpdates(step *model.AgentStep, updates map[string]any) {
 			step.ResultSummary, _ = value.(string)
 		case "mcp_request_id":
 			step.MCPRequestID, _ = value.(string)
+		case "operation_id":
+			step.OperationID, _ = value.(string)
 		}
 	}
 }
@@ -748,6 +752,41 @@ func TestGraphNonReplayableFailuresRequireExplicitReview(t *testing.T) {
 				t.Fatalf("explicit retry_unknown failed: task=%#v err=%v", resumed, err)
 			}
 		})
+	}
+}
+
+func TestGraphRetryReusesDurableOperationID(t *testing.T) {
+	definition := graphTestDefinition("safe.write", hub.RiskLow, false, false, true, false)
+	service, _, _, gateway := newGraphTestService(t, definition, []graphTestReply{
+		{content: graphTestToolPlan(definition.Name)},
+		{content: "recovered answer"},
+	})
+	gateway.callErr = errors.New("temporary upstream failure")
+	task, err := service.CreateTask(context.Background(), "alice", "retry a safe operation", "test.chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.ProcessTask(context.Background(), task.ID); err == nil {
+		t.Fatal("first invocation unexpectedly succeeded")
+	}
+	failed, err := service.GetTask(context.Background(), "alice", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := graphTestToolStep(failed)
+	if step == nil || step.OperationID == "" || len(gateway.operationIDs) != 1 || gateway.operationIDs[0] != step.OperationID {
+		t.Fatalf("first durable operation ID was not persisted and forwarded: step=%#v calls=%#v", step, gateway.operationIDs)
+	}
+
+	gateway.callErr = nil
+	if _, err := service.ResumeTask(context.Background(), "alice", task.ID, false); err != nil {
+		t.Fatalf("resume failed task: %v", err)
+	}
+	if err := service.ProcessTask(context.Background(), task.ID); err != nil {
+		t.Fatalf("process resumed task: %v", err)
+	}
+	if len(gateway.operationIDs) != 2 || gateway.operationIDs[1] != step.OperationID {
+		t.Fatalf("retry operation IDs = %#v, want the original %q", gateway.operationIDs, step.OperationID)
 	}
 }
 

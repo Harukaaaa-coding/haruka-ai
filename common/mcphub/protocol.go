@@ -15,7 +15,7 @@ import (
 type ProtocolClient interface {
 	Initialize(context.Context) (ProtocolInfo, error)
 	ListTools(context.Context) ([]mcp.Tool, error)
-	CallTool(context.Context, string, map[string]any) (*mcp.CallToolResult, error)
+	CallTool(context.Context, string, map[string]any, *mcp.Meta) (*mcp.CallToolResult, error)
 	Close() error
 }
 
@@ -116,8 +116,8 @@ func (protocol *httpProtocolClient) ListTools(ctx context.Context) ([]mcp.Tool, 
 	return append([]mcp.Tool(nil), result.Tools...), nil
 }
 
-func (protocol *httpProtocolClient) CallTool(ctx context.Context, name string, arguments map[string]any) (*mcp.CallToolResult, error) {
-	request := mcp.CallToolRequest{Params: mcp.CallToolParams{Name: name, Arguments: arguments}}
+func (protocol *httpProtocolClient) CallTool(ctx context.Context, name string, arguments map[string]any, metadata *mcp.Meta) (*mcp.CallToolResult, error) {
+	request := mcp.CallToolRequest{Params: mcp.CallToolParams{Name: name, Arguments: arguments, Meta: metadata}}
 	result, err := protocol.client.CallTool(ctx, request)
 	if err != nil {
 		return nil, fmt.Errorf("MCP tools/call: %w", err)

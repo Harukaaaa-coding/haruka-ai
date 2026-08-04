@@ -141,16 +141,21 @@ type InvokeRequest struct {
 	ToolName      string         `json:"tool_name"`
 	Arguments     map[string]any `json:"arguments"`
 	ApprovalToken string         `json:"approval_token,omitempty"`
+	// OperationID is an internal, stable idempotency key. It is forwarded in
+	// MCP's _meta object rather than injected into tool arguments, preserving
+	// each tool's declared JSON Schema.
+	OperationID string `json:"-"`
 }
 
 type InvocationResult struct {
-	RequestID  string              `json:"request_id"`
-	ToolName   string              `json:"tool_name"`
-	ServerID   string              `json:"server_id"`
-	Risk       RiskLevel           `json:"risk"`
-	Attempts   int                 `json:"attempts"`
-	DurationMS int64               `json:"duration_ms"`
-	Result     *mcp.CallToolResult `json:"result"`
+	RequestID   string              `json:"request_id"`
+	OperationID string              `json:"operation_id,omitempty"`
+	ToolName    string              `json:"tool_name"`
+	ServerID    string              `json:"server_id"`
+	Risk        RiskLevel           `json:"risk"`
+	Attempts    int                 `json:"attempts"`
+	DurationMS  int64               `json:"duration_ms"`
+	Result      *mcp.CallToolResult `json:"result"`
 }
 
 type ApprovalChallenge struct {

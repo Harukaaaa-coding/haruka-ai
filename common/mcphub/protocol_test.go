@@ -11,6 +11,7 @@ import (
 )
 
 func TestHTTPProtocolInitializeListAndCall(t *testing.T) {
+	var operationID string
 	upstream := server.NewMCPServer("hub-protocol-test", "1.0.0", server.WithToolCapabilities(true))
 	upstream.AddTool(
 		mcp.NewTool(
@@ -19,6 +20,9 @@ func TestHTTPProtocolInitializeListAndCall(t *testing.T) {
 			mcp.WithReadOnlyHintAnnotation(true),
 		),
 		func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			if request.Params.Meta != nil {
+				operationID, _ = request.Params.Meta.AdditionalFields["gopherai/operation_id"].(string)
+			}
 			return mcp.NewToolResultText(request.GetString("text", "")), nil
 		},
 	)
@@ -50,7 +54,7 @@ func TestHTTPProtocolInitializeListAndCall(t *testing.T) {
 		t.Fatalf("tools = %#v", tools)
 	}
 	result, err := registry.Invoke(ctx, InvokeRequest{
-		UserName: "alice", ToolName: "test.echo", Arguments: map[string]any{"text": "hello hub"},
+		UserName: "alice", ToolName: "test.echo", Arguments: map[string]any{"text": "hello hub"}, OperationID: "operation-123",
 	})
 	if err != nil {
 		t.Fatalf("Invoke(): %v", err)
@@ -61,5 +65,8 @@ func TestHTTPProtocolInitializeListAndCall(t *testing.T) {
 	text, ok := result.Result.Content[0].(mcp.TextContent)
 	if !ok || text.Text != "hello hub" {
 		t.Fatalf("content = %#v", result.Result.Content)
+	}
+	if operationID != "operation-123" || result.OperationID != operationID {
+		t.Fatalf("MCP operation metadata = %q, invocation operation ID = %q", operationID, result.OperationID)
 	}
 }

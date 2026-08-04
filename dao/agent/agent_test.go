@@ -117,6 +117,7 @@ func TestNormalizePlanStepsOwnsAndResetsRuntimeState(t *testing.T) {
 		ApprovalReason:    "old decision",
 		ApprovalDecidedAt: &now,
 		MCPRequestID:      "old-request",
+		OperationID:       "old-operation",
 		StartedAt:         &now,
 		FinishedAt:        &now,
 	}}
@@ -135,7 +136,7 @@ func TestNormalizePlanStepsOwnsAndResetsRuntimeState(t *testing.T) {
 	if step.ToolArgumentsJSON == "" {
 		t.Fatal("durable tool arguments were unexpectedly removed")
 	}
-	if step.ToolOutputJSON != "" || step.ResultSummary != "" || step.MCPRequestID != "" || step.StartedAt != nil || step.FinishedAt != nil {
+	if step.ToolOutputJSON != "" || step.ResultSummary != "" || step.MCPRequestID != "" || step.OperationID != "" || step.StartedAt != nil || step.FinishedAt != nil {
 		t.Fatalf("previous execution state was retained: %#v", step)
 	}
 	if step.ApprovalDecision != model.AgentApprovalDecisionPending || step.ApprovalDecidedAt != nil {
@@ -151,6 +152,39 @@ func TestFencingTokenContext(t *testing.T) {
 	}
 	if _, _, ok := FencingTokenFromContext(context.Background()); ok {
 		t.Fatal("unexpected fencing token in an unmodified context")
+	}
+	workerCtx := WithWorkerFencingToken(context.Background(), "task-2", 9, "worker-a")
+	taskID, version, workerID, ok := WorkerFencingTokenFromContext(workerCtx)
+	if !ok || taskID != "task-2" || version != 9 || workerID != "worker-a" {
+		t.Fatalf("WorkerFencingTokenFromContext() = %q, %d, %q, %v", taskID, version, workerID, ok)
+	}
+	_, _, legacyWorkerID, ok := WorkerFencingTokenFromContext(ctx)
+	if !ok || legacyWorkerID != "" {
+		t.Fatalf("legacy fencing token worker ID = %q, ok=%v", legacyWorkerID, ok)
+	}
+}
+
+func TestActiveLeaseFenceRequiresMatchingWorkerToken(t *testing.T) {
+	ctx := WithWorkerFencingToken(context.Background(), "task-1", 7, "worker-a")
+	if workerID, active := activeLeaseFenceFromContext(ctx, "task-1", 7); !active || workerID != "worker-a" {
+		t.Fatalf("activeLeaseFenceFromContext() = %q, %v", workerID, active)
+	}
+	for _, test := range []struct {
+		name       string
+		ctx        context.Context
+		taskID     string
+		runVersion uint64
+	}{
+		{name: "legacy token", ctx: WithFencingToken(context.Background(), "task-1", 7), taskID: "task-1", runVersion: 7},
+		{name: "different task", ctx: ctx, taskID: "task-2", runVersion: 7},
+		{name: "different run", ctx: ctx, taskID: "task-1", runVersion: 8},
+		{name: "no token", ctx: context.Background(), taskID: "task-1", runVersion: 7},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if workerID, active := activeLeaseFenceFromContext(test.ctx, test.taskID, test.runVersion); active || workerID != "" {
+				t.Fatalf("activeLeaseFenceFromContext() = %q, %v", workerID, active)
+			}
+		})
 	}
 }
 

@@ -476,6 +476,10 @@ func (registry *Registry) Invoke(ctx context.Context, request InvokeRequest) (re
 	if err := tool.ValidateArguments(request.Arguments); err != nil {
 		return nil, err
 	}
+	operationID := strings.TrimSpace(request.OperationID)
+	if len(operationID) > 64 {
+		return nil, newError(ErrorInvalidArguments, "operation ID is too long", nil)
+	}
 	if tool.RequiresApproval {
 		if request.ApprovalToken == "" {
 			required := &ApprovalRequiredError{ToolName: tool.Name, Risk: tool.Risk}
@@ -491,7 +495,7 @@ func (registry *Registry) Invoke(ctx context.Context, request InvokeRequest) (re
 	if err != nil {
 		return nil, err
 	}
-	callResult, attempts, err := registry.invokeUpstream(ctx, runtime, tool, request.Arguments)
+	callResult, attempts, err := registry.invokeUpstream(ctx, runtime, tool, request.Arguments, operationID)
 	event.Attempts = attempts
 	event.ResultSummary = summarizeResult(callResult)
 	if err != nil {
@@ -509,17 +513,18 @@ func (registry *Registry) Invoke(ctx context.Context, request InvokeRequest) (re
 	}
 	duration := time.Since(startedAt).Milliseconds()
 	return &InvocationResult{
-		RequestID:  requestID,
-		ToolName:   tool.Name,
-		ServerID:   tool.ServerID,
-		Risk:       tool.Risk,
-		Attempts:   attempts,
-		DurationMS: duration,
-		Result:     callResult,
+		RequestID:   requestID,
+		OperationID: operationID,
+		ToolName:    tool.Name,
+		ServerID:    tool.ServerID,
+		Risk:        tool.Risk,
+		Attempts:    attempts,
+		DurationMS:  duration,
+		Result:      callResult,
 	}, nil
 }
 
-func (registry *Registry) invokeUpstream(parent context.Context, runtime *serverRuntime, tool ToolDefinition, arguments map[string]any) (*mcp.CallToolResult, int, error) {
+func (registry *Registry) invokeUpstream(parent context.Context, runtime *serverRuntime, tool ToolDefinition, arguments map[string]any, operationID string) (*mcp.CallToolResult, int, error) {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	if runtime.client == nil {
@@ -533,8 +538,12 @@ func (registry *Registry) invokeUpstream(parent context.Context, runtime *server
 		maxAttempts += runtime.config.MaxReadOnlyRetries
 	}
 	var lastErr error
+	var metadata *mcp.Meta
+	if operationID != "" {
+		metadata = mcp.NewMetaFromMap(map[string]any{"gopherai/operation_id": operationID})
+	}
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		result, err := runtime.client.CallTool(ctx, tool.UpstreamName, arguments)
+		result, err := runtime.client.CallTool(ctx, tool.UpstreamName, arguments, metadata)
 		if err == nil {
 			return result, attempt, nil
 		}

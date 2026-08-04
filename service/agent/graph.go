@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 )
 
 const (
@@ -317,9 +318,14 @@ func (service *Service) toolNode(ctx context.Context, taskID string) (string, er
 		return "", err
 	}
 	now := service.clock.Now()
+	operationID := step.OperationID
+	if operationID == "" {
+		operationID = uuid.NewString()
+	}
 	if err := service.store.UpdateStepFenced(ctx, task.ID, step.ID, runVersion, map[string]any{
 		"status":        model.AgentStepStatusRunning,
 		"attempts":      step.Attempts + 1,
+		"operation_id":  operationID,
 		"started_at":    &now,
 		"finished_at":   nil,
 		"error_message": "",
@@ -356,7 +362,12 @@ func (service *Service) toolNode(ctx context.Context, taskID string) (string, er
 		return "", service.requirePolicyReview(ctx, task, step, runVersion, definition)
 	}
 
-	request := hub.InvokeRequest{UserName: task.UserName, ToolName: step.ToolName, Arguments: arguments}
+	request := hub.InvokeRequest{
+		UserName:    task.UserName,
+		ToolName:    step.ToolName,
+		Arguments:   arguments,
+		OperationID: operationID,
+	}
 	if step.RequiresApproval {
 		challenge, challengeErr := service.mcp.CreateApproval(ctx, task.UserName, step.ToolName, arguments)
 		if challengeErr != nil {

@@ -101,6 +101,10 @@ type AgentStep struct {
 	ApprovalReason    string     `gorm:"type:varchar(500)" json:"approval_reason,omitempty"`
 	ApprovalDecidedAt *time.Time `json:"approval_decided_at,omitempty"`
 	MCPRequestID      string     `gorm:"type:varchar(36);index" json:"mcp_request_id,omitempty"`
+	// OperationID is generated before the first external invocation and is
+	// retained across explicit retries. Agent calls forward it through MCP
+	// request metadata so compatible tools can use it as an idempotency key.
+	OperationID string `gorm:"type:varchar(36);index:idx_agent_step_operation_id" json:"operation_id,omitempty"`
 
 	StartedAt  *time.Time `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`

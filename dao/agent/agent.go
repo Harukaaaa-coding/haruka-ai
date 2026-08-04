@@ -115,6 +115,7 @@ func (store *GormStore) CreateTaskWithInitialStep(ctx context.Context, task *mod
 	initialStep.ApprovalReason = ""
 	initialStep.ApprovalDecidedAt = nil
 	initialStep.MCPRequestID = ""
+	initialStep.OperationID = ""
 	initialStep.StartedAt = nil
 	initialStep.FinishedAt = nil
 	task.CurrentStepID = initialStep.ID
@@ -272,8 +273,8 @@ func (store *GormStore) RenewLeaseFenced(ctx context.Context, taskID string, run
 	now := store.currentTime()
 	leaseUntil := now.Add(leaseDuration)
 	result := db.WithContext(ctx).Model(&model.AgentTask{}).
-		Where("id = ? AND run_version = ? AND lease_owner = ? AND status IN ?",
-			taskID, runVersion, workerID, leaseRenewableTaskStatuses()).
+		Where("id = ? AND run_version = ? AND lease_owner = ? AND lease_until > ? AND status IN ?",
+			taskID, runVersion, workerID, now, leaseRenewableTaskStatuses()).
 		Updates(map[string]any{
 			"lease_until":  &leaseUntil,
 			"heartbeat_at": &now,
@@ -314,8 +315,8 @@ func (store *GormStore) savePlan(ctx context.Context, taskID string, runVersion 
 	now := store.currentTime()
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task model.AgentTask
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND run_version = ?", taskID, runVersion).
+		taskQuery := store.activeLeaseFencedTaskQuery(tx.Clauses(clause.Locking{Strength: "UPDATE"}), ctx, taskID, runVersion, now)
+		if err := taskQuery.
 			First(&task).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrConflict
@@ -363,8 +364,7 @@ func (store *GormStore) savePlan(ctx context.Context, taskID string, runVersion 
 		if summary != nil {
 			taskUpdates["plan_summary"] = *summary
 		}
-		result := tx.Model(&model.AgentTask{}).
-			Where("id = ? AND run_version = ?", taskID, runVersion).
+		result := store.activeLeaseFencedTaskQuery(tx.Model(&model.AgentTask{}), ctx, taskID, runVersion, now).
 			Updates(taskUpdates)
 		if result.Error != nil {
 			return result.Error
@@ -396,6 +396,7 @@ func normalizePlanSteps(task model.AgentTask, steps []model.AgentStep) []model.A
 		step.ApprovalReason = ""
 		step.ApprovalDecidedAt = nil
 		step.MCPRequestID = ""
+		step.OperationID = ""
 		step.ToolOutputJSON = ""
 		step.ResultSummary = ""
 		step.StartedAt = nil
@@ -480,9 +481,9 @@ func (store *GormStore) UpdateTaskFenced(ctx context.Context, taskID string, run
 	if len(updates) == 0 {
 		return ErrInvalidInput
 	}
-	updates["updated_at"] = store.currentTime()
-	result := db.WithContext(ctx).Model(&model.AgentTask{}).
-		Where("id = ? AND run_version = ?", taskID, runVersion).
+	now := store.currentTime()
+	updates["updated_at"] = now
+	result := store.activeLeaseFencedTaskQuery(db.WithContext(ctx).Model(&model.AgentTask{}), ctx, taskID, runVersion, now).
 		Updates(updates)
 	if result.Error != nil {
 		return result.Error
@@ -505,11 +506,12 @@ func (store *GormStore) UpdateStepFenced(ctx context.Context, taskID, stepID str
 	if len(updates) == 0 {
 		return ErrInvalidInput
 	}
-	updates["updated_at"] = store.currentTime()
+	now := store.currentTime()
+	updates["updated_at"] = now
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task model.AgentTask
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").
-			Where("id = ? AND run_version = ?", taskID, runVersion).
+		taskQuery := store.activeLeaseFencedTaskQuery(tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id"), ctx, taskID, runVersion, now)
+		if err := taskQuery.
 			First(&task).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrConflict
@@ -548,8 +550,9 @@ func (store *GormStore) MarkExecutionUnknownFenced(ctx context.Context, taskID, 
 
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task model.AgentTask
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND run_version = ? AND status = ?", taskID, runVersion, model.AgentTaskStatusRunning).
+		taskQuery := store.activeLeaseFencedTaskQuery(tx.Clauses(clause.Locking{Strength: "UPDATE"}), ctx, taskID, runVersion, now).
+			Where("status = ?", model.AgentTaskStatusRunning)
+		if err := taskQuery.
 			First(&task).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrConflict
@@ -573,8 +576,8 @@ func (store *GormStore) MarkExecutionUnknownFenced(ctx context.Context, taskID, 
 			return ErrConflict
 		}
 
-		taskResult := tx.Model(&model.AgentTask{}).
-			Where("id = ? AND run_version = ? AND status = ?", taskID, runVersion, task.Status).
+		taskResult := store.activeLeaseFencedTaskQuery(tx.Model(&model.AgentTask{}), ctx, taskID, runVersion, now).
+			Where("status = ?", task.Status).
 			Updates(map[string]any{
 				"status":          model.AgentTaskStatusRequiresReview,
 				"current_step_id": stepID,
@@ -623,8 +626,9 @@ func (store *GormStore) MarkPolicyReviewFenced(
 
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var task model.AgentTask
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND run_version = ? AND status = ?", taskID, runVersion, model.AgentTaskStatusRunning).
+		taskQuery := store.activeLeaseFencedTaskQuery(tx.Clauses(clause.Locking{Strength: "UPDATE"}), ctx, taskID, runVersion, now).
+			Where("status = ?", model.AgentTaskStatusRunning)
+		if err := taskQuery.
 			First(&task).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return ErrConflict
@@ -656,8 +660,8 @@ func (store *GormStore) MarkPolicyReviewFenced(
 			return ErrConflict
 		}
 
-		taskResult := tx.Model(&model.AgentTask{}).
-			Where("id = ? AND run_version = ? AND status = ?", taskID, runVersion, task.Status).
+		taskResult := store.activeLeaseFencedTaskQuery(tx.Model(&model.AgentTask{}), ctx, taskID, runVersion, now).
+			Where("status = ?", task.Status).
 			Updates(map[string]any{
 				"status":          model.AgentTaskStatusRequiresReview,
 				"current_step_id": stepID,
@@ -1063,11 +1067,18 @@ func (store *GormStore) recoverLockedTask(tx *gorm.DB, task model.AgentTask, now
 			"status":          taskStatus,
 			"current_step_id": currentStepID,
 			"run_version":     gorm.Expr("run_version + 1"),
-			"lease_owner":     "",
-			"lease_until":     nil,
-			"heartbeat_at":    nil,
-			"error_message":   taskError,
-			"updated_at":      now,
+			// Recovery has already normalized every running step from the
+			// durable MySQL state. Keeping the abandoned Eino cursor here would
+			// create a second, stale source of truth and can also fail after a
+			// graph upgrade. The next claim therefore starts a fresh graph run;
+			// nextRoute skips steps that MySQL records as completed.
+			"checkpoint":         nil,
+			"checkpoint_version": gorm.Expr("checkpoint_version + 1"),
+			"lease_owner":        "",
+			"lease_until":        nil,
+			"heartbeat_at":       nil,
+			"error_message":      taskError,
+			"updated_at":         now,
 		})
 	if result.Error != nil {
 		return result.Error
@@ -1092,13 +1103,25 @@ func stepCanReplayAfterCrash(step model.AgentStep) bool {
 type fencingToken struct {
 	taskID     string
 	runVersion uint64
+	workerID   string
 }
 
 type fencingTokenContextKey struct{}
 
 // WithFencingToken binds checkpoint writes to a claimed task generation.
 func WithFencingToken(ctx context.Context, taskID string, runVersion uint64) context.Context {
-	return context.WithValue(ctx, fencingTokenContextKey{}, fencingToken{taskID: taskID, runVersion: runVersion})
+	return WithWorkerFencingToken(ctx, taskID, runVersion, "")
+}
+
+// WithWorkerFencingToken records the worker that owns an active lease as well
+// as the monotonically increasing run version. Store writes made with this
+// token must prove both ownership and that the lease has not expired.
+func WithWorkerFencingToken(ctx context.Context, taskID string, runVersion uint64, workerID string) context.Context {
+	return context.WithValue(ctx, fencingTokenContextKey{}, fencingToken{
+		taskID:     taskID,
+		runVersion: runVersion,
+		workerID:   strings.TrimSpace(workerID),
+	})
 }
 
 func FencingTokenFromContext(ctx context.Context) (taskID string, runVersion uint64, ok bool) {
@@ -1110,6 +1133,42 @@ func FencingTokenFromContext(ctx context.Context) (taskID string, runVersion uin
 		return "", 0, false
 	}
 	return token.taskID, token.runVersion, true
+}
+
+// WorkerFencingTokenFromContext returns the optional lease owner carried by a
+// fencing token. Tokens created by older callers intentionally return an
+// empty worker ID and retain run-version-only behavior for compatibility.
+func WorkerFencingTokenFromContext(ctx context.Context) (taskID string, runVersion uint64, workerID string, ok bool) {
+	if ctx == nil {
+		return "", 0, "", false
+	}
+	token, ok := ctx.Value(fencingTokenContextKey{}).(fencingToken)
+	if !ok || token.taskID == "" || token.runVersion == 0 {
+		return "", 0, "", false
+	}
+	return token.taskID, token.runVersion, token.workerID, true
+}
+
+// activeLeaseFencedTaskQuery applies the normal RunVersion fence and, when a
+// worker-aware token is present, requires that worker's lease to still be
+// valid. This closes the interval after a lease expires but before stale-task
+// recovery has incremented RunVersion. Human transitions do not carry a
+// worker token and deliberately use their own transactional preconditions.
+func (store *GormStore) activeLeaseFencedTaskQuery(query *gorm.DB, ctx context.Context, taskID string, runVersion uint64, now time.Time) *gorm.DB {
+	query = query.Where("id = ? AND run_version = ?", taskID, runVersion)
+	workerID, active := activeLeaseFenceFromContext(ctx, taskID, runVersion)
+	if !active {
+		return query
+	}
+	return query.Where("lease_owner = ? AND lease_until > ?", workerID, now)
+}
+
+func activeLeaseFenceFromContext(ctx context.Context, taskID string, runVersion uint64) (workerID string, active bool) {
+	tokenTaskID, tokenRunVersion, workerID, ok := WorkerFencingTokenFromContext(ctx)
+	if !ok || tokenTaskID != taskID || tokenRunVersion != runVersion || workerID == "" {
+		return "", false
+	}
+	return workerID, true
 }
 
 func (store *GormStore) GetCheckpoint(ctx context.Context, taskID string) ([]byte, bool, error) {
@@ -1148,6 +1207,11 @@ func (store *GormStore) SetCheckpoint(ctx context.Context, taskID string, checkp
 		query = query.Where("run_version = ?", runVersion)
 		fenced = true
 	}
+	// Checkpoints are normally written while the worker owns an active lease.
+	// The approval node is the narrow exception: it intentionally releases its
+	// lease before Eino persists the approval interrupt checkpoint. RunVersion
+	// remains the fence here so a later claim, cancellation, or recovery still
+	// rejects a stale checkpoint write.
 	result := query.Updates(map[string]any{
 		"checkpoint":         append([]byte(nil), checkpoint...),
 		"checkpoint_version": gorm.Expr("checkpoint_version + 1"),

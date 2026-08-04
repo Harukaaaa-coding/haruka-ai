@@ -14,7 +14,7 @@ import (
 type fakeProtocolClient struct {
 	mu             sync.Mutex
 	tools          []mcp.Tool
-	call           func(context.Context, string, map[string]any) (*mcp.CallToolResult, error)
+	call           func(context.Context, string, map[string]any, *mcp.Meta) (*mcp.CallToolResult, error)
 	initializeCall int
 	listCall       int
 	callCount      int
@@ -35,7 +35,7 @@ func (client *fakeProtocolClient) ListTools(context.Context) ([]mcp.Tool, error)
 	return append([]mcp.Tool(nil), client.tools...), nil
 }
 
-func (client *fakeProtocolClient) CallTool(ctx context.Context, name string, arguments map[string]any) (*mcp.CallToolResult, error) {
+func (client *fakeProtocolClient) CallTool(ctx context.Context, name string, arguments map[string]any, metadata *mcp.Meta) (*mcp.CallToolResult, error) {
 	client.mu.Lock()
 	client.callCount++
 	call := client.call
@@ -43,7 +43,7 @@ func (client *fakeProtocolClient) CallTool(ctx context.Context, name string, arg
 	if call == nil {
 		return mcp.NewToolResultText("ok"), nil
 	}
-	return call(ctx, name, arguments)
+	return call(ctx, name, arguments, metadata)
 }
 
 func (client *fakeProtocolClient) Close() error {
@@ -138,7 +138,7 @@ func TestRegistryDiscoversNamespacedAllowlistedTools(t *testing.T) {
 func TestRegistryRetriesOnlyReadOnlyTool(t *testing.T) {
 	var readCalls int
 	fake := &fakeProtocolClient{tools: testTools()}
-	fake.call = func(_ context.Context, name string, _ map[string]any) (*mcp.CallToolResult, error) {
+	fake.call = func(_ context.Context, name string, _ map[string]any, _ *mcp.Meta) (*mcp.CallToolResult, error) {
 		if name == "read" {
 			readCalls++
 			if readCalls == 1 {
@@ -217,7 +217,7 @@ func TestRegistryApprovalRequiredAndTokenCannotBeReused(t *testing.T) {
 
 func TestRegistryValidatesBeforeCallingAndAppliesTimeout(t *testing.T) {
 	fake := &fakeProtocolClient{tools: testTools()}
-	fake.call = func(ctx context.Context, _ string, _ map[string]any) (*mcp.CallToolResult, error) {
+	fake.call = func(ctx context.Context, _ string, _ map[string]any, _ *mcp.Meta) (*mcp.CallToolResult, error) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
